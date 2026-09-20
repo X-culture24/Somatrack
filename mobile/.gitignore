@@ -1,0 +1,75 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IntelliJ / Android Studio
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Visual Studio Code
+.vscode/
+
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+/build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/coverage/
+
+# Android
+android/.gradle/
+android/local.properties
+android/app/build/
+android/key.properties
+android/*.iml
+android/app/*.iml
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/.idea/
+android/captures/
+android/gradlew
+android/gradlew.bat
+android/gradle/wrapper/gradle-wrapper.jar
+
+# iOS / macOS
+Pods/
+*.podspec
+*.xcworkspace
+*.xcuserstate
+DerivedData/
+ios/Runner/GeneratedPluginRegistrant.*
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+ios/Flutter/app.flx
+ios/Flutter/app.zip
+ios/Flutter/flutter_assets/
+ios/Flutter/flutter_export_environment.sh
+.DS_Store
+.build/
+.swiftpm/
+Runner.app.dSYM.zip
+
+# Web
+web/build/
+web/.next/
+
+# Linux / Windows
+linux/flutter/
+windows/flutter/

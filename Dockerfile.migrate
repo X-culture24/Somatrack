@@ -1,0 +1,23 @@
+FROM golang:1.23-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download && \
+    go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+
+COPY migrations /migrations
+
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata postgresql-client
+
+COPY --from=builder /go/bin/migrate /usr/local/bin/migrate
+COPY --from=builder /migrations /migrations
+
+ENV DB_URL=postgres://st_mary:James_Bond007%21@db:5432/st_marys_db?sslmode=disable
+
+ENTRYPOINT ["/usr/local/bin/migrate", "-path", "/migrations", "-database", "${DB_URL}"]
+CMD ["up"]

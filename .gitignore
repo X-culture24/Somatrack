@@ -1,0 +1,37 @@
+# Python
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+*.sqlite3
+media/
+staticfiles/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Env / secrets
+.env
+.env.local
+
+# Go build output
+/bin/
+*.exe
+*.test
+
+# Postman/newman scratch
+newman/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
