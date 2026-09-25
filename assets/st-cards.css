@@ -1,0 +1,207 @@
+/* SomaTrack integration card: HTML/CSS port of the IntegrationCard React component.
+   Markup:
+   <article class="st-card">
+     <div class="st-visual" data-center="logo|<lucide icon>" data-icons="icon,icon,..."></div>
+     <div class="st-card-body"><h3>…</h3><p>…</p><a class="st-more" href="…">Learn more</a></div>
+   </article>
+   st-cards.js draws the connector lines and icon tiles inside .st-visual. */
+
+:root {
+  --st-primary: #0047ab;
+  --st-primary-hover: #2f66b8;
+  --st-navy: #002f6c;
+  --st-ink: #0b1f3a;
+  --st-muted: #52607a;
+  --st-border: #dde6f5;
+  --st-visual-bg: #eef3fc;
+}
+
+.st-grid {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--st-min, 300px), 100%), 1fr));
+}
+
+.st-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid var(--st-border);
+  border-radius: 20px;
+  overflow: hidden;
+  transition: transform .25s ease, box-shadow .25s ease;
+}
+.st-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 40px rgba(0, 47, 108, .14);
+}
+
+/* ---- Visual panel (VisualContainer) ---- */
+.st-visual {
+  position: relative;
+  aspect-ratio: 564 / 410;
+  background: var(--st-visual-bg);
+  overflow: hidden;
+  container-type: inline-size;
+}
+.st-visual::before { /* dot grid */
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: .2;
+  background-image: radial-gradient(circle, var(--st-navy) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.st-visual::after { /* fade top and bottom */
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(255,255,255,.6) 10%, rgba(255,255,255,0) 50%, rgba(255,255,255,.6) 90%);
+}
+.st-stage { position: absolute; inset: 7%; z-index: 1; }
+.st-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.st-line-base { stroke: #c9d6ec; stroke-width: 1.5; fill: none; }
+.st-line-flow {
+  stroke: var(--st-primary);
+  stroke-opacity: .55;
+  stroke-width: 3;
+  stroke-linecap: round;
+  fill: none;
+  stroke-dasharray: 40 160;
+  animation: st-flow 4s linear infinite;
+}
+@keyframes st-flow { from { stroke-dashoffset: 200; } to { stroke-dashoffset: -200; } }
+
+.st-tile {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(28px, 11cqw, 54px);
+  height: clamp(28px, 11cqw, 54px);
+  border-radius: clamp(8px, 2.6cqw, 14px);
+  background: #ffffff;
+  border: 1px solid var(--st-border);
+  box-shadow: 0 2px 6px rgba(0, 47, 108, .08);
+  color: var(--st-navy);
+  transform: translate(-50%, -50%) scale(.8);
+  opacity: 0;
+  transition: opacity .45s ease, transform .45s ease;
+  transition-delay: var(--d, 0s);
+}
+.st-tile svg { width: 46%; height: 46%; stroke-width: 1.8; }
+.st-visual.is-in .st-tile { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+.st-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  padding: clamp(3px, 1.4cqw, 8px);
+  border-radius: clamp(10px, 3.2cqw, 18px);
+  background: #ffffff;
+  border: 1px solid var(--st-border);
+  box-shadow: 0 10px 28px rgba(0, 47, 108, .16);
+}
+.st-center-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(30px, 12cqw, 60px);
+  height: clamp(30px, 12cqw, 60px);
+  border: 1px solid var(--st-border);
+  border-radius: clamp(8px, 2.4cqw, 13px);
+  background: var(--st-navy);
+  color: #F9B42F;
+}
+.st-center-inner svg { width: 52%; height: 52%; stroke-width: 2; }
+.st-center-inner img { width: 70%; height: 70%; object-fit: contain; }
+.st-center--logo .st-center-inner { background: #ffffff; }
+.st-center::after { /* pulse ring */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid rgba(0, 71, 171, .18);
+  animation: st-pulse 3s ease-in-out infinite;
+}
+@keyframes st-pulse {
+  0%, 100% { transform: scale(1); opacity: .5; }
+  50% { transform: scale(1.15); opacity: 0; }
+}
+
+/* ---- Body (CardContent) ---- */
+.st-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 26px 26px 28px;
+}
+.st-card-body h3 {
+  margin: 0;
+  color: var(--st-ink);
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+.st-card-body p { margin: 0; color: var(--st-muted); font-size: 15.5px; line-height: 1.6; }
+.st-kicker {
+  color: var(--st-primary) !important;
+  font-size: 12px !important;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.st-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.st-list li { display: flex; gap: 10px; color: var(--st-ink); font-size: 15px; line-height: 1.5; }
+.st-list li::before { content: "✓"; color: var(--st-primary); font-weight: 700; flex: none; }
+.st-note {
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--st-border);
+}
+.st-note p { color: var(--st-ink); }
+.st-more {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 20px;
+  border-radius: 999px;
+  background: var(--st-primary);
+  color: #ffffff !important;
+  font-size: 14.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background .2s ease, transform .1s ease;
+}
+.st-spacer { flex: 1; min-height: 8px; }
+.st-more:hover { background: var(--st-primary-hover); }
+.st-more:active { transform: translateY(1px); }
+.st-badge {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 4;
+  background: var(--st-primary);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+.st-card--featured { border: 2px solid var(--st-primary); }
+
+@media (prefers-reduced-motion: reduce) {
+  .st-line-flow, .st-center::after { animation: none; }
+  .st-tile { transition: none; }
+  .st-card, .st-card:hover { transition: none; transform: none; }
+}

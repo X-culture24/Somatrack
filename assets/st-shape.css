@@ -1,0 +1,53 @@
+/* Stacked sections: each block has rounded top corners and slides up over the one before it
+   while scrolling. st-stack.js marks the blocks (.st-block) and sets their sticky offsets. */
+:root { --st-r: 40px; --st-backdrop: #001a40; }
+@media (max-width: 809.98px) { :root { --st-r: 26px; } }
+
+html, body { background: var(--st-backdrop) !important; }
+/* Framer's page wrappers paint white behind everything, and clip vertically */
+.st-stack-host {
+  background: transparent !important;
+  overflow-x: clip !important;
+  overflow-y: visible !important;
+}
+main[data-framer-name="Main"] { background: transparent !important; }
+
+.st-block {
+  border-radius: var(--st-r) var(--st-r) 0 0 !important;
+  overflow: hidden;
+  box-shadow: 0 -18px 40px rgba(0, 16, 40, .28);
+}
+.st-block:not(.st-block--first) { margin-top: calc(-1 * var(--st-r)) !important; }
+.st-block--first { border-radius: 0 !important; box-shadow: none; }
+/* A block being covered becomes a fully rounded card as it recedes */
+.st-block--receding { border-radius: var(--st-r) !important; }
+
+/* Sections inside a block wrapper take its rounded shape */
+.st-block > section, .st-block > footer { border-radius: inherit !important; }
+
+/* Covered sections dim slightly as the next one slides over them */
+.st-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  background: #000814;
+  opacity: var(--st-cover, 0);
+}
+
+/* Merged groups: one block holding several sections */
+.st-merge { display: block; width: 100%; flex: none; align-self: stretch; box-sizing: border-box; }
+.st-merge > * { margin-top: 0 !important; }
+/* Inside a merged block the sections butt together; only the block itself is rounded */
+.st-merge section, .st-merge footer { border-radius: 0 !important; }
+.st-merge > section:first-child { border-radius: inherit !important; }
+
+/* Scroll distance during which the section above stays fully in view */
+.st-hold { pointer-events: none; }
+
+/* Fixed nav bars stay above the stack */
+.st-over { z-index: 1000 !important; }
+
+/* Blue-on-blue separation inside navy sections */
+.st-carousel { box-shadow: 0 0 0 1px rgba(255, 255, 255, .14), 0 24px 60px rgba(0, 20, 60, .35); }

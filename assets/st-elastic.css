@@ -1,0 +1,119 @@
+/* Elastic gallery: HTML/CSS port of the ElasticGallery React component, in SomaTrack colours.
+   st-elastic.js wraps each .st-card of a .st-grid in a panel; without JS the grid stays. */
+
+.st-elastic {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.st-el-panel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid var(--st-border, #dde6f5);
+  background: #ffffff;
+  cursor: pointer;
+  outline: none;
+}
+.st-el-panel:focus-visible { box-shadow: 0 0 0 3px #F9B42F; }
+
+/* The card inside keeps its own layout; the panel only clips it. */
+.st-el-panel > .st-card { border: 0; border-radius: 0; height: 100%; }
+.st-el-panel > .st-card:hover { transform: none; box-shadow: none; }
+
+/* Collapsed face: navy cover with the card's icon and title */
+.st-el-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 20px;
+  background: linear-gradient(160deg, #2a6fd6 0%, #0047ab 100%);
+  color: #ffffff;
+  transition: opacity .5s ease, filter .5s ease;
+}
+.st-el-cover::before { /* dot grid echoing the card visuals */
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: .14;
+  background-image: radial-gradient(circle, #ffffff 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.st-el-icon {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .1);
+  border: 1px solid rgba(255, 255, 255, .22);
+  color: #F9B42F;
+}
+.st-el-icon svg { width: 20px; height: 20px; stroke-width: 2; }
+.st-el-title {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.st-el-num {
+  position: relative;
+  order: -1;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, .6);
+}
+
+.st-el-panel.is-active .st-el-cover { opacity: 0; pointer-events: none; }
+.st-el-panel:not(.is-active) .st-el-cover { filter: brightness(.82); }
+.st-el-panel:not(.is-active):hover .st-el-cover { filter: brightness(1); }
+
+/* Active content slides up, as in the original */
+.st-el-panel > .st-card .st-card-body { transition: transform .5s ease, opacity .5s ease; }
+.st-el-panel:not(.is-active) > .st-card .st-card-body { transform: translateY(48px); opacity: 0; }
+.st-el-panel.is-active > .st-card .st-card-body { transition-delay: .2s; }
+.st-el-panel > .st-card .st-visual { transition: transform 1s ease; }
+.st-el-panel:not(.is-active) > .st-card .st-visual { transform: scale(1.1); }
+
+/* ---- Phones: stacked list, collapsed rows are a fixed height ---- */
+@media (max-width: 767.98px) {
+  .st-el-panel { height: 68px; transition: height .6s cubic-bezier(.25, 1, .5, 1); }
+  .st-el-panel.is-active { height: var(--st-el-open, auto); }
+}
+
+/* ---- Desktop: horizontal accordion ---- */
+@media (min-width: 768px) {
+  .st-elastic { flex-direction: row; gap: 14px; height: var(--st-el-h, 600px); }
+  .st-el-panel {
+    flex: 1 1 0;
+    min-width: 0;
+    transition: flex .7s cubic-bezier(.25, 1, .5, 1);
+  }
+  .st-el-panel.is-active { flex: 4 1 0; }
+  /* Fixed-width card so text never reflows while the panel animates */
+  .st-el-panel > .st-card { position: absolute; top: 0; left: 0; bottom: 0; width: var(--st-el-w, 420px); }
+  .st-el-panel > .st-card .st-visual { aspect-ratio: auto; flex: 1 1 auto; min-height: 150px; }
+  .st-el-panel > .st-card .st-card-body { flex: none; }
+  .st-el-cover { flex-direction: column; justify-content: flex-end; padding: 24px 0 28px; }
+  .st-el-icon { order: 2; margin-top: 18px; }
+  .st-el-num { order: 0; margin: 0 0 auto; padding-top: 4px; }
+  .st-el-title { order: 1; flex: none; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 17px; max-height: 70%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .st-el-panel, .st-el-cover, .st-el-panel > .st-card .st-card-body, .st-el-panel > .st-card .st-visual { transition: none !important; }
+}
