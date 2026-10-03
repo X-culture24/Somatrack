@@ -94,5 +94,6 @@ DROP TABLE IF EXISTS auth_permission;
 DROP TABLE IF EXISTS django_content_type;
 DROP TABLE IF EXISTS users;
 
--- Extension
-DROP EXTENSION IF EXISTS "pgcrypto";
+-- pgcrypto is deliberately left installed: extensions are database-wide,
+-- not per schema, so dropping it here would also remove it from every other
+-- schema in the database (e.g. the throwaway ones the test suites migrate).

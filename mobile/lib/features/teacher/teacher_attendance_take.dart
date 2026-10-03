@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/api/api_client.dart';
 import '../../../core/models/school.dart';
 import '../../../core/providers/attendance_provider.dart';
 import '../../../core/theme/app_theme.dart';
@@ -85,17 +86,31 @@ class _TeacherAttendanceTakePageState
   }
 
   Future<void> _saveAttendance() async {
+    if (_selectedClass == null) return;
     setState(() => _saving = true);
-    await Future.delayed(const Duration(seconds: 1));
-    if (!mounted) return;
-    setState(() => _saving = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Attendance saved successfully'),
-        backgroundColor: AppTheme.success,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    try {
+      await context.read<AttendanceProvider>().markAttendance(
+            classId: _selectedClass!,
+            date: DateFormat('yyyy-MM-dd').format(_selectedDate),
+            statusByStudentId: _statuses,
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Attendance saved successfully'),
+          backgroundColor: AppTheme.success,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save attendance: ${e.message}')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   void _markAll(String status) {

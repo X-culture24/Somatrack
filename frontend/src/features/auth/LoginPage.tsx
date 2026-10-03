@@ -2,19 +2,21 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { portalHome, useAuth } from "../../store/auth";
 import { Button, Card, Field, Input } from "../../components/ui";
+import { PENDING_LINK_KEY } from "../public/ShortLinkPage";
 
 const demos = [
-  ["Administrator", "admin@stmaryskabete.ac.ke", "Admin@2026"],
-  ["Finance officer", "finance@stmaryskabete.ac.ke", "Finance@2026"],
-  ["Class teacher", "teacher@stmaryskabete.ac.ke", "Teacher@2026"],
-  ["Parent", "parent@stmaryskabete.ac.ke", "Parent@2026"],
+  ["Administrator", "admin@stmaryskabete.ac.ke", "Admin1234!"],
+  ["Head Teacher", "headteacher@stmaryskabete.ac.ke", "Admin1234!"],
+  ["Finance officer", "finance@stmaryskabete.ac.ke", "Admin1234!"],
+  ["Teacher", "teacher@stmaryskabete.ac.ke", "Admin1234!"],
+  ["Parent", "parent@stmaryskabete.ac.ke", "Admin1234!"],
 ];
 
 export function LoginPage() {
   const login = useAuth((s) => s.login);
   const navigate = useNavigate();
   const [email, setEmail] = useState("admin@stmaryskabete.ac.ke");
-  const [password, setPassword] = useState("Admin@2026");
+  const [password, setPassword] = useState("Admin1234!");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -24,7 +26,8 @@ export function LoginPage() {
     setError("");
     try {
       const user = await login(email, password);
-      navigate(portalHome(user.portal));
+      // Signed in from an SMS link: finish opening it instead of going home.
+      navigate(sessionStorage.getItem(PENDING_LINK_KEY) ? "/r" : portalHome(user.portal));
     } catch {
       setError("Could not sign in. Check email, password, and that the API is running.");
     } finally {
@@ -53,7 +56,7 @@ export function LoginPage() {
           </p>
           {/* Feature pills */}
           <div className="mt-6 flex flex-wrap gap-2">
-            {["Finance & M-Pesa", "Nova LMS", "CBC Academics", "Parent Portal"].map((f) => (
+            {["Finance & M-Pesa", "Nova LMS", "CBC Academics", "Payroll"].map((f) => (
               <span key={f} className="rounded-full bg-white/10 border border-white/20 px-3 py-1 text-xs text-white/80">
                 {f}
               </span>

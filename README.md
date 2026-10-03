@@ -142,10 +142,27 @@ A pass over the whole system found and fixed:
 - M-Pesa Paybill `247247`, account format `137101#CHILDSNAME`
 
 ```bash
-curl -X POST http://localhost:8000/api/webhooks/mpesa/confirmation \
+curl -X POST http://localhost:8002/api/webhooks/payments/confirmation \
   -H "Content-Type: application/json" \
   -H "X-Mpesa-Secret: dev-mpesa-secret" \
   -d '{"TransID":"QK7TEST001","TransAmount":"5000","BillRefNumber":"137101#FAITH OTIENO","TransTime":"20260115104500"}'
+```
+
+### Equity Jenga (IPN)
+
+Paybill 247247 is Equity's, so its payments reach us as Jenga IPNs, not Safaricom C2B callbacks.
+
+1. `scripts/jenga-keygen.sh` → upload `secrets/jenga_public.pem` in Jenga HQ.
+2. Fill the `JENGA_*` vars in `.env` (merchant code, consumer secret, API key, IPN username/password).
+3. In Jenga HQ set the IPN callback URL to `https://<domain>/api/webhooks/payments/jenga-ipn` with the same Basic auth.
+4. Check credentials: `curl -H "X-Service-Key: $PAYMENT_SERVICE_KEY" http://localhost:8002/internal/payments/jenga/status`
+
+Simulate an IPN locally:
+
+```bash
+curl -X POST http://localhost:8000/api/webhooks/payments/jenga-ipn -u "$JENGA_IPN_USERNAME:$JENGA_IPN_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{"customer":{"name":"JANE DOE","mobileNumber":"254712345678","reference":"137101#FAITH OTIENO"},"transaction":{"date":"2026-01-15 10:45:00.0","reference":"QK7TEST002","paymentMode":"MPESA","amount":5000,"status":"SUCCESS"},"bank":{"transactionType":"C","account":"1370263402101"}}'
 ```
 
 ## Production checklist

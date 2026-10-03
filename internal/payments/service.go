@@ -27,9 +27,12 @@ type Service struct {
 	notificationCli *rpc.NotificationClient
 	nairobiLoc      *time.Location
 	useAsync        bool
+	stkStore        *STKPushStore
+	jenga           *jengaDeps
+	equityRTB       *EquityRTBStore
 }
 
-func NewService(matcher *Matcher, reconciler *Reconciler, processor *AsynqProcessor, sharedSecret string, allowedIPs []string, notifCli *rpc.NotificationClient, loc *time.Location, useAsync bool) *Service {
+func NewService(matcher *Matcher, reconciler *Reconciler, processor *AsynqProcessor, sharedSecret string, allowedIPs []string, notifCli *rpc.NotificationClient, loc *time.Location, useAsync bool, stkStore *STKPushStore) *Service {
 	return &Service{
 		matcher:         matcher,
 		reconciler:      reconciler,
@@ -39,18 +42,143 @@ func NewService(matcher *Matcher, reconciler *Reconciler, processor *AsynqProces
 		notificationCli: notifCli,
 		nairobiLoc:      loc,
 		useAsync:        useAsync,
+		stkStore:        stkStore,
 	}
 }
 
+func (s *Service) EnableEquityRTB(store *EquityRTBStore) {
+	s.equityRTB = store
+}
+
+// RegisterPublicRoutes exposes the C2B callback endpoints. The path
+// deliberately avoids the word "mpesa" — Safaricom's RegisterURL API
+// rejects any Confirmation/Validation URL containing it
+// ("400.003.02 Bad Request - Invalid ValidationURL - URL has the word MPESA"),
+// confirmed against their own sandbox while wiring this up.
 func (s *Service) RegisterPublicRoutes(r chi.Router) {
-	r.Post("/webhooks/mpesa/confirmation", s.handleMpesaConfirmation)
-	r.Post("/webhooks/mpesa/validation", s.handleMpesaValidation)
+	r.Post("/webhooks/payments/confirmation", s.handleMpesaConfirmation)
+	r.Post("/webhooks/payments/validation", s.handleMpesaValidation)
+	r.Post("/webhooks/payments/stk-callback", s.handleSTKCallback)
+	s.registerJengaPublicRoutes(r)
 }
 
 func (s *Service) RegisterInternalRoutes(r chi.Router) {
 	r.Post("/payments/mpesa/process", s.handleInternalProcessPayment)
 	r.Post("/invoices/{invoiceID}/recompute", s.handleRecomputeInvoice)
 	r.Post("/reminders/send", s.handleSendReminders)
+	r.Post("/payments/manual", s.handleManualPayment)
+	r.Post("/payments/stk-push/initiate", s.handleSTKInitiate)
+	r.Get("/payments/stk-push/{id}/status", s.handleSTKStatus)
+	// Same handler as the public webhook — the gateway relays Safaricom's
+	// callback here over the trusted internal channel when only the gateway
+	// (not payment-svc directly) has a public tunnel, e.g. behind ngrok's
+	// free-tier one-tunnel limit. See internal/api/pay_fees.go's callback relay.
+	r.Post("/payments/stk-push/callback", s.handleSTKCallback)
+	// Equity EazzyPay / Request to Pay (C2B)
+	r.Post("/payments/equity/rtb/initiate", s.handleEquityRTBInitiate)
+	r.Get("/payments/equity/rtb/{id}/status", s.handleEquityRTBStatus)
+	s.registerJengaInternalRoutes(r)
+}
+
+func (s *Service) handleSTKInitiate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		StudentID   uuid.UUID `json:"student_id"`
+		InitiatedBy uuid.UUID `json:"initiated_by"`
+		Phone       string    `json:"phone"`
+		Amount      float64   `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	if body.StudentID == uuid.Nil || body.Phone == "" || body.Amount <= 0 {
+		httpx.ErrBadRequest(w, "student_id, phone, and a positive amount are required")
+		return
+	}
+	req, err := s.stkStore.Initiate(r.Context(), body.StudentID, body.InitiatedBy, body.Phone, body.Amount)
+	if err != nil && req == nil {
+		httpx.Error(w, http.StatusBadGateway, err)
+		return
+	}
+	httpx.JSON(w, http.StatusAccepted, req)
+}
+
+func (s *Service) handleSTKStatus(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid id")
+		return
+	}
+	req, err := s.stkStore.GetStatus(r.Context(), id)
+	if err != nil {
+		httpx.ErrNotFound(w, "stk push request not found")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, req)
+}
+
+func (s *Service) handleSTKCallback(w http.ResponseWriter, r *http.Request) {
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	if err := s.stkStore.HandleCallback(r.Context(), payload); err != nil {
+		// Still 200 — Safaricom retries aggressively on non-2xx, and a
+		// processing error here is ours to fix, not theirs to resend for.
+		httpx.JSON(w, http.StatusOK, map[string]string{"ResultCode": "0", "ResultDesc": "Accepted (processing error logged)"})
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"ResultCode": "0", "ResultDesc": "Accepted"})
+}
+
+func (s *Service) handleEquityRTBInitiate(w http.ResponseWriter, r *http.Request) {
+	if s.equityRTB == nil {
+		httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":   "equity_not_configured",
+			"message": "Equity Request to Pay is not enabled — check JENGA_* environment variables.",
+		})
+		return
+	}
+	var body struct {
+		StudentID  uuid.UUID `json:"student_id"`
+		InitiatedBy uuid.UUID `json:"initiated_by"`
+		Phone      string    `json:"phone"`
+		Amount     float64   `json:"amount"`
+		WalletName string    `json:"wallet_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	if body.StudentID == uuid.Nil || body.Phone == "" || body.Amount <= 0 {
+		httpx.ErrBadRequest(w, "student_id, phone, and a positive amount are required")
+		return
+	}
+	req, err := s.equityRTB.Initiate(r.Context(), body.StudentID, body.InitiatedBy, body.Phone, body.WalletName, body.Amount)
+	if err != nil && req == nil {
+		httpx.Error(w, http.StatusBadGateway, err)
+		return
+	}
+	httpx.JSON(w, http.StatusAccepted, req)
+}
+
+func (s *Service) handleEquityRTBStatus(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid id")
+		return
+	}
+	if s.equityRTB == nil {
+		httpx.ErrNotFound(w, "equity rtb not configured")
+		return
+	}
+	req, err := s.equityRTB.GetStatus(r.Context(), id)
+	if err != nil {
+		httpx.ErrNotFound(w, "request not found")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, req)
 }
 
 // realIP resolves the client IP for the MPESA_ALLOWED_IPS allowlist check.
@@ -105,13 +233,21 @@ func (s *Service) checkIP(ip string) bool {
 	return false
 }
 
+// checkSecret verifies the shared secret. Safaricom's C2B confirmation/
+// validation callbacks never carry custom headers — it just POSTs to
+// whatever URL you registered — so the secret has to live in the URL
+// (query string) you give Safaricom at registration time. The header
+// checks remain for local/manual curl testing convenience.
 func (s *Service) checkSecret(r *http.Request) bool {
+	if s.sharedSecret == "" {
+		return true
+	}
 	h := r.Header.Get("X-Mpesa-Secret")
 	if h == "" {
 		h = r.Header.Get("X-Shared-Secret")
 	}
-	if s.sharedSecret == "" {
-		return true
+	if h == "" {
+		h = r.URL.Query().Get("secret")
 	}
 	return subtle.ConstantTimeCompare([]byte(h), []byte(s.sharedSecret)) == 1
 }
@@ -188,15 +324,7 @@ func (s *Service) handleMpesaConfirmation(w http.ResponseWriter, r *http.Request
 		RawPayload:    rawStr,
 	}
 	if !skip {
-		if s.useAsync && s.processor != nil {
-			_, err = s.processor.EnqueueProcess(r.Context(), params)
-			if err != nil {
-				_, _, _, _, err = s.reconciler.ProcessPayment(r.Context(), params, s.matcher)
-			}
-		} else {
-			_, _, _, _, err = s.reconciler.ProcessPayment(r.Context(), params, s.matcher)
-		}
-		_ = err
+		s.dispatch(r.Context(), params)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -205,10 +333,25 @@ func (s *Service) handleMpesaConfirmation(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// dispatch hands a payment to the async worker when Redis is available,
+// falling back to processing inline.
+func (s *Service) dispatch(ctx context.Context, params ProcessPaymentParams) {
+	if s.useAsync && s.processor != nil {
+		if _, err := s.processor.EnqueueProcess(ctx, params); err == nil {
+			return
+		}
+	}
+	_, _, _, _, _ = s.reconciler.ProcessPayment(ctx, params, s.matcher)
+}
+
 func (s *Service) handleInternalProcessPayment(w http.ResponseWriter, r *http.Request) {
 	var p rpc.ProcessMpesaPaymentRequest
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	if p.TransID == "" {
+		httpx.ErrBadRequest(w, "trans_id required")
 		return
 	}
 	params := ProcessPaymentParams{
@@ -221,6 +364,21 @@ func (s *Service) handleInternalProcessPayment(w http.ResponseWriter, r *http.Re
 		LastName:      p.LastName,
 		MSISDN:        p.MSISDN,
 		RawPayload:    p.RawPayload,
+	}
+	// ProcessPayment expects a row already locked in mpesa_webhook_events (the
+	// public webhook handler creates it via EnsureWebhookEvent before calling
+	// this) — this internal entry point skipped that step entirely, so every
+	// call here failed with "lock event: no rows in result set". This was
+	// dead/broken code with no caller until the admin "simulate payment" tool
+	// started using it.
+	_, skip, err := s.reconciler.EnsureWebhookEvent(r.Context(), p.TransID, p.RawPayload)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if skip {
+		httpx.ErrConflict(w, fmt.Sprintf("trans_id %q already processed", p.TransID))
+		return
 	}
 	paymentID, studentID, invoiceID, status, err := s.reconciler.ProcessPayment(r.Context(), params, s.matcher)
 	if err != nil {
@@ -271,50 +429,61 @@ func (s *Service) SendFeeReminders(ctx context.Context) (int, error) {
 	if s.notificationCli == nil {
 		return 0, nil
 	}
+	// One reminder per student (summed over their current-term invoices), not
+	// one per invoice — otherwise a parent gets several texts for one child.
 	rows, err := s.reconciler.pool.Query(ctx, `
-		SELECT DISTINCT ON (i.id)
-		       i.id, i.student_id, i.balance, s.first_name, s.last_name,
-		       g.phone AS guardian_phone, g.email AS guardian_email
-		FROM invoices i
-		JOIN students s ON s.id = i.student_id
+		WITH bal AS (
+			SELECT i.student_id, SUM(i.balance) AS balance
+			FROM invoices i
+			JOIN terms t ON t.id = i.term_id AND t.is_current = TRUE
+			WHERE i.balance > 0
+			GROUP BY i.student_id
+		)
+		SELECT DISTINCT ON (s.id)
+		       s.id, b.balance, s.first_name, s.last_name, s.admission_no,
+		       g.phone AS guardian_phone
+		FROM bal b
+		JOIN students s ON s.id = b.student_id AND s.is_active = TRUE
 		LEFT JOIN student_guardians sg ON sg.student_id = s.id
 		LEFT JOIN guardians g ON g.id = sg.guardian_id
-		WHERE i.balance > 0
-		  AND EXISTS (SELECT 1 FROM terms t WHERE t.id = i.term_id AND t.is_current = TRUE)
-		ORDER BY i.id, sg.is_primary DESC, sg.contact_priority ASC`)
+		ORDER BY s.id, sg.is_primary DESC, sg.contact_priority ASC`)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
-	count := 0
 	type reminderRow struct {
-		InvoiceID uuid.UUID
-		StudentID uuid.UUID
-		Balance   float64
-		FirstName string
-		LastName  string
-		Phone     *string
-		Email     *string
+		StudentID   uuid.UUID
+		Balance     float64
+		FirstName   string
+		LastName    string
+		AdmissionNo string
+		Phone       *string
 	}
 	var pending []reminderRow
 	for rows.Next() {
 		var r reminderRow
-		if err := rows.Scan(&r.InvoiceID, &r.StudentID, &r.Balance, &r.FirstName, &r.LastName, &r.Phone, &r.Email); err != nil {
+		if err := rows.Scan(&r.StudentID, &r.Balance, &r.FirstName, &r.LastName, &r.AdmissionNo, &r.Phone); err != nil {
 			continue
 		}
 		pending = append(pending, r)
 	}
+	count := 0
 	for _, r := range pending {
-		if r.Phone != nil {
-			msg := fmt.Sprintf("ACK St.Mary's Reminder: %s %s has a balance of KES %.2f. Pay via M-Pesa Paybill 247247 Acc %s.",
-				r.FirstName, r.LastName, r.Balance, s.matcher.accountPrefix+r.StudentID.String()[:6])
-			_ = s.notificationCli.EnqueueSMS(ctx, &rpc.SendSMSRequest{
-				To:      *r.Phone,
-				Message: msg,
-				Meta:    map[string]string{"student_id": r.StudentID.String(), "invoice_id": r.InvoiceID.String()},
-			})
-			count++
+		if r.Phone == nil || strings.TrimSpace(*r.Phone) == "" {
+			continue
 		}
+		// The account reference is the admission number — the key
+		// Matcher.MatchStudent tries first, so the payment posts automatically.
+		msg := fmt.Sprintf("ACK St.Mary's: Fee reminder for %s %s - balance KES %.2f. Pay via Paybill 247247, Acc %s%s.",
+			r.FirstName, r.LastName, r.Balance, s.matcher.accountPrefix, r.AdmissionNo)
+		if err := s.notificationCli.EnqueueSMS(ctx, &rpc.SendSMSRequest{
+			To:      *r.Phone,
+			Message: msg,
+			Meta:    map[string]string{"student_id": r.StudentID.String(), "kind": "fee_reminder"},
+		}); err != nil {
+			continue
+		}
+		count++
 	}
 	return count, nil
 }

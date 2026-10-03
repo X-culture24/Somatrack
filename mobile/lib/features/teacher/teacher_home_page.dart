@@ -8,6 +8,7 @@ import '../../../core/providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets.dart';
 import 'teacher_attendance_take.dart';
+import 'teacher_lesson_plans_page.dart';
 
 class TeacherHomePage extends StatefulWidget {
   const TeacherHomePage({super.key});
@@ -251,7 +252,10 @@ class _TeacherHomePageState extends State<TeacherHomePage> {
               const SizedBox(width: 10),
               Expanded(
                   child: _action(Icons.menu_book_outlined, 'Lesson\nPlan',
-                      Colors.purple, () {})),
+                      Colors.purple, () {
+                Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const TeacherLessonPlansPage()));
+              })),
             ],
           ),
         ],

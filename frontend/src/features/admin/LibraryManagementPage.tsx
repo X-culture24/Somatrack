@@ -19,6 +19,42 @@ export function LibraryManagementPage() {
   // Checkout form
   const [checkoutForm, setCheckoutForm] = useState({ book: "", student: "", due_at: "", borrower_type: "student" });
 
+  const EMPTY_BOOK = { title: "", author: "", isbn: "", publisher: "", shelf_location: "", total_copies: "1", price: "0" };
+  const [bookForm, setBookForm] = useState(EMPTY_BOOK);
+  const [editingBookId, setEditingBookId] = useState<string | null>(null);
+
+  const addBook = useMutation({
+    mutationFn: () => schoolApi.createBook({ ...bookForm, total_copies: Number(bookForm.total_copies), price: Number(bookForm.price) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["library-books"] }); setBookForm(EMPTY_BOOK); },
+    onError: (err: any) => window.alert(err?.response?.data?.message ?? "Could not add this book — check the fields above."),
+  });
+  const updateBook = useMutation({
+    mutationFn: () => schoolApi.updateBook(editingBookId!, { ...bookForm, total_copies: Number(bookForm.total_copies), price: Number(bookForm.price) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["library-books"] }); setBookForm(EMPTY_BOOK); setEditingBookId(null); },
+    onError: (err: any) => window.alert(err?.response?.data?.message ?? "Could not save changes."),
+  });
+
+  function startEditBook(b: any) {
+    setEditingBookId(b.id);
+    setBookForm({
+      title: b.title, author: b.author ?? "", isbn: b.isbn ?? "", publisher: b.publisher ?? "",
+      shelf_location: b.shelf_location ?? "", total_copies: String(b.total_copies), price: String(b.price ?? 0),
+    });
+  }
+  function cancelEditBook() {
+    setEditingBookId(null);
+    setBookForm(EMPTY_BOOK);
+  }
+  async function handleSaveBook() {
+    const isEdit = Boolean(editingBookId);
+    const ok = await confirm({
+      title: isEdit ? "Save book changes" : "Add book",
+      message: isEdit ? `Save changes to "${bookForm.title}"?` : `Add "${bookForm.title}" with ${bookForm.total_copies} cop${bookForm.total_copies === "1" ? "y" : "ies"}?`,
+      confirmLabel: isEdit ? "Save changes" : "Add book",
+    });
+    if (ok) (isEdit ? updateBook : addBook).mutate();
+  }
+
   const checkout = useMutation({
     mutationFn: () => api.post("/library/loans/", checkoutForm).then((r: any) => r.data),
     onSuccess: () => {
@@ -27,12 +63,12 @@ export function LibraryManagementPage() {
       setCheckoutForm({ book: "", student: "", due_at: "", borrower_type: "student" });
     },
     onError: (err: any) => {
-      window.alert(err?.response?.data?.book?.[0] ?? "Could not issue this book. Check the details and try again.");
+      window.alert(err?.response?.data?.message ?? "Could not issue this book. Check the details and try again.");
     },
   });
 
   const returnBook = useMutation({
-    mutationFn: (loanId: number) => schoolApi.returnBook(loanId),
+    mutationFn: (loanId: string) => schoolApi.returnBook(loanId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["library-loans"] });
       qc.invalidateQueries({ queryKey: ["library-overdue"] });
@@ -41,7 +77,7 @@ export function LibraryManagementPage() {
   });
 
   const renewLoan = useMutation({
-    mutationFn: (loanId: number) => schoolApi.renewLoan(loanId),
+    mutationFn: (loanId: string) => schoolApi.renewLoan(loanId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["library-loans"] });
       qc.invalidateQueries({ queryKey: ["library-overdue"] });
@@ -114,6 +150,26 @@ export function LibraryManagementPage() {
         <>
           <Input className="max-w-xs" placeholder="Search title or author…" value={search} onChange={(e) => setSearch(e.target.value)} />
 
+          {/* Add/edit book form */}
+          <Card>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="font-semibold text-[#1b365d]">{editingBookId ? "Edit book" : "Add book"}</h3>
+              {editingBookId && <Button variant="ghost" onClick={cancelEditBook}>Cancel edit</Button>}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Field label="Title"><Input value={bookForm.title} onChange={(e) => setBookForm({ ...bookForm, title: e.target.value })} /></Field>
+              <Field label="Author"><Input value={bookForm.author} onChange={(e) => setBookForm({ ...bookForm, author: e.target.value })} /></Field>
+              <Field label="ISBN"><Input value={bookForm.isbn} onChange={(e) => setBookForm({ ...bookForm, isbn: e.target.value })} /></Field>
+              <Field label="Publisher"><Input value={bookForm.publisher} onChange={(e) => setBookForm({ ...bookForm, publisher: e.target.value })} /></Field>
+              <Field label="Shelf location"><Input value={bookForm.shelf_location} onChange={(e) => setBookForm({ ...bookForm, shelf_location: e.target.value })} placeholder="e.g. A-12" /></Field>
+              <Field label="Total copies"><Input type="number" min="1" value={bookForm.total_copies} onChange={(e) => setBookForm({ ...bookForm, total_copies: e.target.value })} /></Field>
+              <Field label="Price (KES)"><Input type="number" min="0" value={bookForm.price} onChange={(e) => setBookForm({ ...bookForm, price: e.target.value })} /></Field>
+            </div>
+            <Button className="mt-3" onClick={handleSaveBook} disabled={addBook.isPending || updateBook.isPending || !bookForm.title}>
+              {addBook.isPending || updateBook.isPending ? "Saving…" : editingBookId ? "Save changes" : "Add book"}
+            </Button>
+          </Card>
+
           {/* Checkout form */}
           <Card>
             <h3 className="mb-3 font-semibold text-[#1b365d]">Issue a book</h3>
@@ -145,12 +201,12 @@ export function LibraryManagementPage() {
             </div>
           </Card>
 
-          <Table headers={["Title", "Author", "Level", "Copies", "Available", "Status"]}>
+          <Table headers={["Title", "Author", "Shelf", "Copies", "Available", "Status", ""]}>
             {filtered.map((b: any) => (
               <tr key={b.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-medium">{b.title}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{b.author || "—"}</td>
-                <td className="px-4 py-3 text-xs">{b.level || "—"}</td>
+                <td className="px-4 py-3 text-xs">{b.shelf_location || "—"}</td>
                 <td className="px-4 py-3">{b.total_copies}</td>
                 <td className="px-4 py-3">
                   <span className={`font-medium ${b.available_copies === 0 ? "text-red-600" : "text-green-600"}`}>
@@ -158,12 +214,18 @@ export function LibraryManagementPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${b.status === "available" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"}`}>
-                    {b.status}
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${b.available_copies > 0 ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"}`}>
+                    {b.available_copies > 0 ? "available" : "all checked out"}
                   </span>
+                </td>
+                <td className="px-4 py-3">
+                  <Button variant="ghost" onClick={() => startEditBook(b)}>Edit</Button>
                 </td>
               </tr>
             ))}
+            {filtered.length === 0 && (
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No books yet — add one above.</td></tr>
+            )}
           </Table>
         </>
       )}

@@ -30,6 +30,11 @@ type DarajaB2CClient struct {
 	InitiatorShortcode  string
 	InitiatorPassword   string
 	CertificatePath     string
+	// SecurityCredential, when set, is used as-is instead of being derived
+	// from InitiatorPassword/CertificatePath — for when Safaricom's own
+	// "Test Credentials" / security-credential-generator tool already
+	// handed you a precomputed RSA-encrypted value for your shortcode.
+	SecurityCredential  string
 	ResultURL           string
 	TimeoutURL          string
 	DefaultCommandID    string
@@ -54,6 +59,7 @@ func NewDarajaB2CClient() *DarajaB2CClient {
 		InitiatorShortcode: os.Getenv("DARAJA_INITIATOR_SHORTCODE"),
 		InitiatorPassword:  os.Getenv("DARAJA_INITIATOR_PASSWORD"),
 		CertificatePath:    getEnv("DARAJA_CERTIFICATE_PATH", "certs/SandboxCertificate.cer"),
+		SecurityCredential: os.Getenv("DARAJA_SECURITY_CREDENTIAL"),
 		ResultURL:          os.Getenv("DARAJA_B2C_RESULT_URL"),
 		TimeoutURL:         os.Getenv("DARAJA_B2C_TIMEOUT_URL"),
 		DefaultCommandID:   getEnv("DARAJA_B2C_COMMAND_ID", "SalaryPayment"),
@@ -122,8 +128,11 @@ func (c *DarajaB2CClient) getAccessToken(forceRefresh bool) (string, error) {
 // securityCredential RSA/PKCS1v15-encrypts the initiator password with Safaricom's
 // published public certificate (PEM or DER), matching Daraja's SecurityCredential spec.
 func (c *DarajaB2CClient) securityCredential() (string, error) {
+	if c.SecurityCredential != "" {
+		return c.SecurityCredential, nil
+	}
 	if c.InitiatorPassword == "" {
-		return "", &DarajaAPIError{"DARAJA_INITIATOR_PASSWORD is not set — cannot derive SecurityCredential"}
+		return "", &DarajaAPIError{"neither DARAJA_SECURITY_CREDENTIAL nor DARAJA_INITIATOR_PASSWORD is set — cannot derive SecurityCredential"}
 	}
 	raw, err := os.ReadFile(c.CertificatePath)
 	if err != nil {

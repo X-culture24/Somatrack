@@ -3,6 +3,7 @@ package fingerprint
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -281,6 +282,10 @@ func (svc *Service) handleStoreTemplate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := svc.templates.Store(r.Context(), studentID, body.TemplateB64, body.EnrolledBy, body.DeviceID); err != nil {
+		if errors.Is(err, ErrInvalidTemplate) {
+			httpx.ErrBadRequest(w, err.Error())
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -336,6 +341,10 @@ func (svc *Service) handleStoreStaffTemplate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := svc.templates.StoreStaff(r.Context(), staffID, body.TemplateB64, body.EnrolledBy, body.DeviceID); err != nil {
+		if errors.Is(err, ErrInvalidTemplate) {
+			httpx.ErrBadRequest(w, err.Error())
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}

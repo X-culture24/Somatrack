@@ -9,6 +9,7 @@ import 'teacher_classes_page.dart';
 import 'teacher_attendance_take.dart';
 import 'teacher_timetable_page.dart';
 import 'teacher_profile_page.dart';
+import 'teacher_lesson_plans_page.dart';
 
 class TeacherShell extends StatefulWidget {
   final Widget child;
@@ -44,7 +45,9 @@ class _TeacherShellState extends State<TeacherShell> {
         ),
         actions: [
           IconButton(
-            onPressed: () {},
+            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('No new notifications.')),
+            ),
             icon: const Icon(Icons.notifications_outlined),
             tooltip: 'Notifications',
           ),
@@ -151,34 +154,46 @@ class _TeacherShellState extends State<TeacherShell> {
       ListTile(
         leading: const Icon(Icons.assignment_outlined),
         title: const Text('Assignments / Nova'),
-        onTap: () => Navigator.pop(context),
+        onTap: () => _popThenComingSoon(),
       ),
       ListTile(
         leading: const Icon(Icons.grade_outlined),
         title: const Text('Marks Entry'),
-        onTap: () => Navigator.pop(context),
+        onTap: () => _popThenComingSoon(),
       ),
       ListTile(
         leading: const Icon(Icons.menu_book_outlined),
         title: const Text('Lesson Plans'),
-        onTap: () => Navigator.pop(context),
+        onTap: () {
+          Navigator.pop(context);
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const TeacherLessonPlansPage()),
+          );
+        },
       ),
       ListTile(
         leading: const Icon(Icons.local_library_outlined),
         title: const Text('Library'),
-        onTap: () => Navigator.pop(context),
+        onTap: () => _popThenComingSoon(),
       ),
       ListTile(
         leading: const Icon(Icons.chat_bubble_outline),
         title: const Text('Messages'),
-        onTap: () => Navigator.pop(context),
+        onTap: () => _popThenComingSoon(),
       ),
       ListTile(
         leading: const Icon(Icons.assessment_outlined),
         title: const Text('Reports'),
-        onTap: () => Navigator.pop(context),
+        onTap: () => _popThenComingSoon(),
       ),
     ];
+  }
+
+  void _popThenComingSoon() {
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Coming soon.')),
+    );
   }
 }
 

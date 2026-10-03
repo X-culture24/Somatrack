@@ -247,24 +247,102 @@ class ClassGroup {
   final String grade;
   final String streamName;
   final String? academicYearId;
+  final String? displayName;
+  final int studentCount;
+  final bool isHomeroom;
+  final List<String> subjectsTaught;
 
   ClassGroup({
     required this.id,
     required this.grade,
     required this.streamName,
     this.academicYearId,
+    this.displayName,
+    this.studentCount = 0,
+    this.isHomeroom = false,
+    this.subjectsTaught = const [],
   });
 
   factory ClassGroup.fromJson(Map<String, dynamic> json) {
     return ClassGroup(
       id: json['id']?.toString() ?? '',
-      grade: json['grade'] ?? '',
+      // grade is a real integer on the backend (Playgroup=-2..Grade 13) —
+      // toString() it rather than assigning the raw dynamic value, which
+      // threw a "type 'int' is not a subtype of type 'String'" at runtime.
+      grade: json['grade']?.toString() ?? '',
       streamName: json['stream_name'] ?? json['stream'] ?? '',
       academicYearId: json['academic_year_id']?.toString(),
+      displayName: json['name']?.toString(),
+      studentCount: (json['student_count'] ?? 0) is int
+          ? json['student_count'] as int
+          : int.tryParse(json['student_count'].toString()) ?? 0,
+      isHomeroom: json['is_homeroom'] == true,
+      subjectsTaught: ((json['subjects_taught'] as List?) ?? [])
+          .map((e) => e.toString())
+          .toList(),
     );
   }
 
-  String get name => '$grade-$streamName';
+  // /teacher/my-classes/ already sends a real display name ("Grade 4 West");
+  // fall back to grade-stream only for callers still on the old /classes/ shape.
+  String get name => (displayName != null && displayName!.isNotEmpty) ? displayName! : '$grade-$streamName';
+}
+
+class LessonPlan {
+  final String id;
+  final String classId;
+  final String className;
+  final String subjectId;
+  final String subjectName;
+  final int weekNumber;
+  final String lessonDate;
+  final String topic;
+  final String subTopic;
+  final String learningObjectives;
+  final String status;
+
+  LessonPlan({
+    required this.id,
+    required this.classId,
+    required this.className,
+    required this.subjectId,
+    required this.subjectName,
+    required this.weekNumber,
+    required this.lessonDate,
+    required this.topic,
+    this.subTopic = '',
+    this.learningObjectives = '',
+    this.status = 'draft',
+  });
+
+  factory LessonPlan.fromJson(Map<String, dynamic> json) {
+    return LessonPlan(
+      id: json['id']?.toString() ?? '',
+      classId: json['class_id']?.toString() ?? '',
+      className: json['class_name'] ?? '',
+      subjectId: json['subject_id']?.toString() ?? '',
+      subjectName: json['subject_name'] ?? '',
+      weekNumber: (json['week_number'] ?? 0) is int
+          ? json['week_number'] as int
+          : int.tryParse(json['week_number'].toString()) ?? 0,
+      lessonDate: json['lesson_date'] ?? '',
+      topic: json['topic'] ?? '',
+      subTopic: json['sub_topic'] ?? '',
+      learningObjectives: json['learning_objectives'] ?? '',
+      status: json['status'] ?? 'draft',
+    );
+  }
+}
+
+class Subject {
+  final String id;
+  final String name;
+
+  Subject({required this.id, required this.name});
+
+  factory Subject.fromJson(Map<String, dynamic> json) {
+    return Subject(id: json['id']?.toString() ?? '', name: json['name'] ?? '');
+  }
 }
 
 class Announcement {
@@ -290,9 +368,9 @@ class Announcement {
       title: json['title'] ?? '',
       body: json['body'] ?? json['content'] ?? '',
       priority: json['priority'] ?? 'normal',
-      createdAt: json['created_at'] != null
-          ? DateTime.tryParse(json['created_at'].toString())
-          : null,
+      // Real column is publish_date — created_at kept as a fallback in case
+      // a future endpoint adds one, but publish_date is what's actually sent.
+      createdAt: DateTime.tryParse((json['publish_date'] ?? json['created_at'] ?? '').toString()),
       audience: json['audience'] ?? 'all',
     );
   }

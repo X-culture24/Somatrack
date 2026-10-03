@@ -34,12 +34,26 @@ func (p *FinanceProxy) RegisterRoutes(r chi.Router) {
 	r.Get("/invoices/{id}/", p.requireAuthenticated(p.handleGetInvoice))
 	r.Get("/payments/", p.requireAuthenticated(p.handleListPayments))
 	r.Get("/fee-structures/", p.requireAuthenticated(p.handleListFeeStructures))
+	r.Post("/fee-structures/", p.requireFinance(p.handleCreateFeeStructure))
+	r.Get("/fee-structures/{id}/", p.requireAuthenticated(p.handleGetFeeStructure))
+	r.Put("/fee-structures/{id}/", p.requireFinance(p.handleUpdateFeeStructure))
+	r.Delete("/fee-structures/{id}/", p.requireFinance(p.handleDeleteFeeStructure))
+
 	r.Get("/discounts/", p.requireAuthenticated(p.handleListDiscounts))
+	r.Post("/discounts/", p.requireFinance(p.handleCreateDiscount))
+
+	r.Post("/billing/generate/", p.requireFinance(p.handleGenerateBilling))
+
+	r.Get("/adhoc-fees/", p.requireAuthenticated(p.handleListAdhocFees))
+	r.Post("/adhoc-fees/", p.requireFinance(p.handleCreateAdhocFee))
+	r.Delete("/adhoc-fees/{id}/", p.requireFinance(p.handleDeleteAdhocFee))
+	r.Post("/invoices/{id}/charges/", p.requireFinance(p.handleAddInvoiceCharge))
 
 	r.Post("/payroll-runs/", p.requireFinance(p.handleGeneratePayrollRun))
 	r.Get("/payroll-runs/", p.requireFinance(p.handleListPayrollRuns))
 	r.Get("/payroll-runs/{id}/entries/", p.requireFinance(p.handleListPayrollEntries))
 	r.Post("/payroll-entries/{id}/disburse/", p.requireFinance(p.handleDisburseEntry))
+	r.Post("/payroll-entries/{id}/disburse/equity/", p.requireFinance(p.handleDisburseEntryEquity))
 }
 
 func (p *FinanceProxy) requireAuthenticated(next http.HandlerFunc) http.HandlerFunc {
@@ -73,7 +87,11 @@ func (p *FinanceProxy) requireFinance(next http.HandlerFunc) http.HandlerFunc {
 // resolveStudentScope returns the set of student IDs the caller may view finance
 // data for. A nil slice means "no restriction" (finance/admin roles). An empty,
 // non-nil slice means "no students visible" (e.g. a parent with no wards).
-func (p *FinanceProxy) resolveStudentScope(ctx context.Context, role types.Role, userID uuid.UUID) ([]uuid.UUID, error) {
+// Package-level (not a *FinanceProxy method) so documents.go's invoice/receipt
+// PDF handlers can enforce the exact same scoping — those originally had none
+// at all, which meant any authenticated user could download any other
+// student's invoice or payment receipt by guessing/iterating a UUID.
+func resolveStudentScope(ctx context.Context, pool *pgxpool.Pool, role types.Role, userID uuid.UUID) ([]uuid.UUID, error) {
 	for _, a := range types.FinanceRoles {
 		if a == role {
 			return nil, nil
@@ -82,13 +100,13 @@ func (p *FinanceProxy) resolveStudentScope(ctx context.Context, role types.Role,
 	if role == types.RoleSystemAdmin {
 		return nil, nil
 	}
-	if p.pool == nil {
+	if pool == nil {
 		return []uuid.UUID{}, nil
 	}
 	switch role {
 	case types.RoleStudent:
 		var id uuid.UUID
-		err := p.pool.QueryRow(ctx, `SELECT id FROM students WHERE user_id = $1`, userID).Scan(&id)
+		err := pool.QueryRow(ctx, `SELECT id FROM students WHERE user_id = $1`, userID).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return []uuid.UUID{}, nil
 		}
@@ -97,7 +115,7 @@ func (p *FinanceProxy) resolveStudentScope(ctx context.Context, role types.Role,
 		}
 		return []uuid.UUID{id}, nil
 	case types.RoleParent:
-		rows, err := p.pool.Query(ctx, `
+		rows, err := pool.Query(ctx, `
 			SELECT sg.student_id FROM guardians g
 			JOIN student_guardians sg ON sg.guardian_id = g.id
 			WHERE g.user_id = $1`, userID)
@@ -132,7 +150,7 @@ func inScope(scope []uuid.UUID, id uuid.UUID) bool {
 func (p *FinanceProxy) handleListInvoices(w http.ResponseWriter, r *http.Request) {
 	role, _ := r.Context().Value("role").(types.Role)
 	userID, _ := r.Context().Value("user_id").(uuid.UUID)
-	scope, err := p.resolveStudentScope(r.Context(), role, userID)
+	scope, err := resolveStudentScope(r.Context(), p.pool, role, userID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
@@ -170,7 +188,7 @@ func (p *FinanceProxy) handleListInvoices(w http.ResponseWriter, r *http.Request
 
 	res, err := p.client.ListInvoices(r.Context(), studentID, status, page, pageSize)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
@@ -184,7 +202,7 @@ func (p *FinanceProxy) handleGetInvoice(w http.ResponseWriter, r *http.Request) 
 	}
 	role, _ := r.Context().Value("role").(types.Role)
 	userID, _ := r.Context().Value("user_id").(uuid.UUID)
-	scope, err := p.resolveStudentScope(r.Context(), role, userID)
+	scope, err := resolveStudentScope(r.Context(), p.pool, role, userID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
@@ -205,7 +223,7 @@ func (p *FinanceProxy) handleGetInvoice(w http.ResponseWriter, r *http.Request) 
 func (p *FinanceProxy) handleListPayments(w http.ResponseWriter, r *http.Request) {
 	role, _ := r.Context().Value("role").(types.Role)
 	userID, _ := r.Context().Value("user_id").(uuid.UUID)
-	scope, err := p.resolveStudentScope(r.Context(), role, userID)
+	scope, err := resolveStudentScope(r.Context(), p.pool, role, userID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
@@ -237,7 +255,7 @@ func (p *FinanceProxy) handleListPayments(w http.ResponseWriter, r *http.Request
 	pageSize, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
 	res, err := p.client.ListPayments(r.Context(), studentID, page, pageSize)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
@@ -264,16 +282,183 @@ func (p *FinanceProxy) handleListFeeStructures(w http.ResponseWriter, r *http.Re
 	}
 	rows, err := p.client.ListFeeStructures(r.Context(), ayID, grade)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{"data": rows})
 }
 
+func (p *FinanceProxy) handleCreateFeeStructure(w http.ResponseWriter, r *http.Request) {
+	var body rpc.FeeStructureInput
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	row, err := p.client.CreateFeeStructure(r.Context(), body)
+	if err != nil {
+		WriteUpstreamError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, row)
+}
+
+func (p *FinanceProxy) handleGetFeeStructure(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid fee structure id")
+		return
+	}
+	row, err := p.client.GetFeeStructure(r.Context(), id)
+	if err != nil {
+		WriteUpstreamError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, row)
+}
+
+func (p *FinanceProxy) handleUpdateFeeStructure(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid fee structure id")
+		return
+	}
+	var body rpc.FeeStructureInput
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	row, err := p.client.UpdateFeeStructure(r.Context(), id, body)
+	if err != nil {
+		WriteUpstreamError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, row)
+}
+
+func (p *FinanceProxy) handleDeleteFeeStructure(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid fee structure id")
+		return
+	}
+	if err := p.client.DeleteFeeStructure(r.Context(), id); err != nil {
+		WriteUpstreamError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": id.String()})
+}
+
+func (p *FinanceProxy) handleCreateDiscount(w http.ResponseWriter, r *http.Request) {
+	var body rpc.DiscountInput
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	userID, ok := r.Context().Value("user_id").(uuid.UUID)
+	if ok && body.ApprovedByID == nil {
+		body.ApprovedByID = &userID
+	}
+	row, err := p.client.CreateDiscount(r.Context(), body)
+	if err != nil {
+		WriteUpstreamError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, row)
+}
+
+func (p *FinanceProxy) handleGenerateBilling(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TermID string `json:"term_id" validate:"required,uuid"`
+	}
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	termID, err := uuid.Parse(body.TermID)
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid term_id")
+		return
+	}
+	result, err := p.client.GenerateBilling(r.Context(), termID)
+	if err != nil {
+		WriteUpstreamError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (p *FinanceProxy) handleListAdhocFees(w http.ResponseWriter, r *http.Request) {
+	var termID *uuid.UUID
+	if s := r.URL.Query().Get("term_id"); s != "" {
+		id, err := uuid.Parse(s)
+		if err != nil {
+			httpx.ErrBadRequest(w, "invalid term_id")
+			return
+		}
+		termID = &id
+	}
+	rows, err := p.client.ListAdhocFees(r.Context(), termID)
+	if err != nil {
+		WriteUpstreamError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{"data": rows})
+}
+
+func (p *FinanceProxy) handleCreateAdhocFee(w http.ResponseWriter, r *http.Request) {
+	var body rpc.AdhocFeeInput
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	row, err := p.client.CreateAdhocFee(r.Context(), body)
+	if err != nil {
+		WriteUpstreamError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, row)
+}
+
+func (p *FinanceProxy) handleDeleteAdhocFee(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid adhoc fee id")
+		return
+	}
+	if err := p.client.DeleteAdhocFee(r.Context(), id); err != nil {
+		WriteUpstreamError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": id.String()})
+}
+
+func (p *FinanceProxy) handleAddInvoiceCharge(w http.ResponseWriter, r *http.Request) {
+	invoiceID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid invoice id")
+		return
+	}
+	var body struct {
+		AdhocFeeID  *uuid.UUID `json:"adhoc_fee_id,omitempty"`
+		Description string     `json:"description"`
+		Amount      float64    `json:"amount"`
+	}
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	inv, err := p.client.AddInvoiceCharge(r.Context(), invoiceID, body.AdhocFeeID, body.Description, body.Amount)
+	if err != nil {
+		WriteUpstreamError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, inv)
+}
+
 func (p *FinanceProxy) handleListDiscounts(w http.ResponseWriter, r *http.Request) {
 	role, _ := r.Context().Value("role").(types.Role)
 	userID, _ := r.Context().Value("user_id").(uuid.UUID)
-	scope, err := p.resolveStudentScope(r.Context(), role, userID)
+	scope, err := resolveStudentScope(r.Context(), p.pool, role, userID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
@@ -303,7 +488,7 @@ func (p *FinanceProxy) handleListDiscounts(w http.ResponseWriter, r *http.Reques
 
 	rows, err := p.client.ListDiscounts(r.Context(), studentID)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{"data": rows})
@@ -321,7 +506,7 @@ func (p *FinanceProxy) handleGeneratePayrollRun(w http.ResponseWriter, r *http.R
 	userID, _ := r.Context().Value("user_id").(uuid.UUID)
 	run, entries, err := p.client.GeneratePayrollRun(r.Context(), body.Month, body.Year, userID)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, map[string]interface{}{"run": run, "entries": entries})
@@ -330,7 +515,7 @@ func (p *FinanceProxy) handleGeneratePayrollRun(w http.ResponseWriter, r *http.R
 func (p *FinanceProxy) handleListPayrollRuns(w http.ResponseWriter, r *http.Request) {
 	rows, err := p.client.ListPayrollRuns(r.Context())
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{"data": rows})
@@ -344,7 +529,7 @@ func (p *FinanceProxy) handleListPayrollEntries(w http.ResponseWriter, r *http.R
 	}
 	rows, err := p.client.ListPayrollEntries(r.Context(), runID)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{"data": rows})
@@ -358,7 +543,21 @@ func (p *FinanceProxy) handleDisburseEntry(w http.ResponseWriter, r *http.Reques
 	}
 	tx, err := p.client.DisburseEntry(r.Context(), entryID)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusAccepted, tx)
+}
+
+func (p *FinanceProxy) handleDisburseEntryEquity(w http.ResponseWriter, r *http.Request) {
+	entryID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid entry id")
+		return
+	}
+	tx, err := p.client.DisburseEntryEquity(r.Context(), entryID)
+	if err != nil {
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusAccepted, tx)

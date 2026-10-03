@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { CheckCircle, Clock, FileText, HelpCircle } from "lucide-react";
 import { novaApi } from "../../api/nova";
 import { Card, PageHeader } from "../../components/ui";

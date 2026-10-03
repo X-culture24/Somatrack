@@ -119,11 +119,6 @@ class _TeacherClassesPageState extends State<TeacherClassesPage> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    TextButton.icon(
-                      onPressed: () {},
-                      icon: const Icon(Icons.bar_chart, size: 18),
-                      label: const Text('Roster'),
-                    ),
                     OutlinedButton.icon(
                       onPressed: () => Navigator.of(context).push(MaterialPageRoute(
                         builder: (_) =>

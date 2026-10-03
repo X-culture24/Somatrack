@@ -7,7 +7,6 @@ import '../../../core/models/school.dart';
 import '../../../core/providers/attendance_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets.dart';
-import '../../../shared/attendance_time_chart.dart';
 
 class ChildAttendancePage extends StatefulWidget {
   final Student student;
@@ -165,27 +164,6 @@ class _ChildAttendancePageState extends State<ChildAttendancePage> {
                       ),
                     )
                   : _buildSummary(range),
-          if (!_loading && range != null && range.events.isNotEmpty) ...[
-            const SectionHeader(title: 'Attendance vs Time'),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: AttendanceTimeChart(
-                    points: range.events
-                        .map((e) => AttendanceTimePoint(
-                              date: DateTime.tryParse(e.date) ?? DateTime.now(),
-                              minutesSinceMidnight:
-                                  AttendanceTimePoint.parseTimeOfDay(e.timeIn),
-                              status: e.status,
-                            ))
-                        .toList(),
-                  ),
-                ),
-              ),
-            ),
-          ],
           const SectionHeader(title: 'Daily Attendance Log'),
           if (_loading)
             const Padding(
@@ -269,6 +247,7 @@ class _ChildAttendancePageState extends State<ChildAttendancePage> {
   }
 
   Widget _buildSummary(StudentAttendanceRange r) {
+    final total = r.expectedDays > 0 ? r.expectedDays : 1;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(

@@ -65,16 +65,9 @@ func (s *ScannerStore) ProcessScan(ctx context.Context, rec *ScanRecord) (attend
 	if rec.StudentID == nil && rec.StaffID == nil {
 		return nil, errors.New("student_id or staff_id required")
 	}
-	if rec.StudentID != nil && rec.StaffID != nil {
-		return nil, errors.New("provide only one of student_id or staff_id")
-	}
 	if rec.StaffID != nil {
 		return s.processStaffScan(ctx, rec)
 	}
-	return s.processStudentScan(ctx, rec)
-}
-
-func (s *ScannerStore) processStudentScan(ctx context.Context, rec *ScanRecord) (attendanceID *uuid.UUID, err error) {
 	date := rec.Timestamp.Truncate(24 * time.Hour)
 	dupStart := rec.Timestamp.Add(-dedupWindow)
 	dupEnd := rec.Timestamp.Add(dedupWindow)
@@ -152,79 +145,6 @@ func (s *ScannerStore) processStudentScan(ctx context.Context, rec *ScanRecord) 
 
 	if err := s.mirrorAcademicsAttendance(ctx, tx, rec); err != nil {
 		return nil, err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	return &attID, nil
-}
-
-func (s *ScannerStore) processStaffScan(ctx context.Context, rec *ScanRecord) (attendanceID *uuid.UUID, err error) {
-	if rec.ScanType != ScanEntry && rec.ScanType != ScanExit {
-		return nil, errors.New("staff scans only support entry or exit")
-	}
-	date := rec.Timestamp.Truncate(24 * time.Hour)
-	dupStart := rec.Timestamp.Add(-dedupWindow)
-	dupEnd := rec.Timestamp.Add(dedupWindow)
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-
-	var existingID uuid.UUID
-	err = tx.QueryRow(ctx, `
-		SELECT id FROM fingerprint_scans
-		WHERE staff_id = $1
-		  AND scan_type = $2
-		  AND date_trunc('day', timestamp) = $3
-		  AND timestamp BETWEEN $4 AND $5
-		LIMIT 1`, *rec.StaffID, rec.ScanType, date, dupStart, dupEnd).Scan(&existingID)
-	if err == nil {
-		rec.ID = existingID
-		rec.IsDuplicate = true
-		return nil, tx.Commit(ctx)
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
-	}
-
-	rec.ID = uuid.New()
-	rec.CreatedAt = time.Now()
-	rec.IsDuplicate = false
-
-	const insScan = `
-		INSERT INTO fingerprint_scans (id, device_id, staff_id, template_id, fingerprint_match_score, scan_type, timestamp, raw_score, is_duplicate, created_at, remarks)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10)`
-	if _, err := tx.Exec(ctx, insScan,
-		rec.ID, rec.DeviceID, rec.StaffID, rec.TemplateID, rec.FingerprintMatchScore,
-		rec.ScanType, rec.Timestamp, rec.RawScore, rec.CreatedAt, rec.Remarks); err != nil {
-		return nil, fmt.Errorf("insert staff scan: %w", err)
-	}
-
-	var score *float64
-	if rec.FingerprintMatchScore != nil {
-		score = rec.FingerprintMatchScore
-	} else if rec.RawScore != nil {
-		score = rec.RawScore
-	}
-
-	var attID uuid.UUID
-	err = tx.QueryRow(ctx, `
-		INSERT INTO staff_attendance (staff_id, date, scan_type, timestamp, device_id, raw_score, match_score, scan_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (staff_id, date, scan_type) DO UPDATE SET
-			timestamp = EXCLUDED.timestamp,
-			device_id = EXCLUDED.device_id,
-			raw_score = COALESCE(EXCLUDED.raw_score, staff_attendance.raw_score),
-			match_score = COALESCE(EXCLUDED.match_score, staff_attendance.match_score)
-		RETURNING id`,
-		*rec.StaffID, date, rec.ScanType, rec.Timestamp, rec.DeviceID, rec.RawScore, score, rec.ID,
-	).Scan(&attID)
-	if err != nil {
-		return nil, fmt.Errorf("upsert staff attendance: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -559,62 +479,115 @@ func (s *ScannerStore) StudentAttendanceRange(ctx context.Context, studentID uui
 	return events, present, late, absent, expected, pct, nil
 }
 
-type StaffAttendanceEvent struct {
-	Date    string  `json:"date"`
-	Status  string  `json:"status"`
-	TimeIn  *string `json:"time_in,omitempty"`
-	TimeOut *string `json:"time_out,omitempty"`
+func (s *ScannerStore) processStaffScan(ctx context.Context, rec *ScanRecord) (*uuid.UUID, error) {
+	date := rec.Timestamp.Truncate(24 * time.Hour)
+	dupStart := rec.Timestamp.Add(-dedupWindow)
+	dupEnd := rec.Timestamp.Add(dedupWindow)
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var existingID uuid.UUID
+	err = tx.QueryRow(ctx, `
+		SELECT id FROM fingerprint_scans
+		WHERE staff_id = $1
+		  AND scan_type = $2
+		  AND date_trunc('day', timestamp) = $3
+		  AND timestamp BETWEEN $4 AND $5
+		LIMIT 1`, *rec.StaffID, rec.ScanType, date, dupStart, dupEnd).Scan(&existingID)
+	if err == nil {
+		rec.ID = existingID
+		rec.IsDuplicate = true
+		return nil, tx.Commit(ctx)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
+	rec.ID = uuid.New()
+	rec.CreatedAt = time.Now()
+	rec.IsDuplicate = false
+
+	score := rec.FingerprintMatchScore
+	if score == nil {
+		score = rec.RawScore
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO fingerprint_scans (id, device_id, staff_id, template_id, fingerprint_match_score, scan_type, timestamp, raw_score, is_duplicate, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9)`,
+		rec.ID, rec.DeviceID, rec.StaffID, rec.TemplateID, rec.FingerprintMatchScore,
+		rec.ScanType, rec.Timestamp, rec.RawScore, rec.CreatedAt); err != nil {
+		return nil, fmt.Errorf("insert staff scan: %w", err)
+	}
+
+	var attID uuid.UUID
+	err = tx.QueryRow(ctx, `
+		INSERT INTO staff_attendance (staff_id, date, scan_type, timestamp, device_id, raw_score, match_score, scan_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (staff_id, date, scan_type) DO UPDATE SET
+			timestamp = EXCLUDED.timestamp,
+			device_id = EXCLUDED.device_id,
+			raw_score = COALESCE(EXCLUDED.raw_score, staff_attendance.raw_score),
+			match_score = COALESCE(EXCLUDED.match_score, staff_attendance.match_score)
+		RETURNING id`,
+		*rec.StaffID, date, rec.ScanType, rec.Timestamp, rec.DeviceID, rec.RawScore, score, rec.ID,
+	).Scan(&attID)
+	if err != nil {
+		return nil, fmt.Errorf("upsert staff_attendance: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &attID, nil
 }
 
-// StaffAttendanceRange returns one event per weekday in [startDate,endDate], deriving
-// present/late/absent from staff_attendance entry/exit rows so it can drive a
-// clock-in-time-vs-date graph the same way StudentAttendanceRange does for students.
-func (s *ScannerStore) StaffAttendanceRange(ctx context.Context, staffID uuid.UUID, startDate, endDate time.Time) ([]StaffAttendanceEvent, int, int, int, int, float64, error) {
+func (s *ScannerStore) StaffAttendanceRange(ctx context.Context, staffID uuid.UUID, startDate, endDate time.Time) ([]StudentAttendanceEvent, int, int, int, int, float64, error) {
 	sd := startDate.Truncate(24 * time.Hour)
 	ed := endDate.Truncate(24 * time.Hour)
-	q := `
+	rows, err := s.pool.Query(ctx, `
 		SELECT
-			d::date::text,
-			to_char(ent.timestamp AT TIME ZONE 'Africa/Nairobi', 'HH24:MI:SS'),
-			to_char(ext.timestamp AT TIME ZONE 'Africa/Nairobi', 'HH24:MI:SS')
-		FROM generate_series($2::date, $3::date, interval '1 day') d
-		LEFT JOIN staff_attendance ent ON ent.staff_id = $1 AND ent.date = d::date AND ent.scan_type = 'entry'
-		LEFT JOIN staff_attendance ext ON ext.staff_id = $1 AND ext.date = d::date AND ext.scan_type = 'exit'
-		WHERE EXTRACT(ISODOW FROM d) < 6
-		ORDER BY d DESC`
-	rows, err := s.pool.Query(ctx, q, staffID, sd, ed)
+			sa.date::text,
+			sa.scan_type,
+			NULL::text,
+			NULL::text,
+			''
+		FROM staff_attendance sa
+		WHERE sa.staff_id = $1
+		  AND sa.date BETWEEN $2 AND $3
+		ORDER BY sa.date DESC`, staffID, sd, ed)
 	if err != nil {
 		return nil, 0, 0, 0, 0, 0, err
 	}
 	defer rows.Close()
-	const cutoff = "08:15:00"
-	events := []StaffAttendanceEvent{}
-	present, late, absent, expected := 0, 0, 0, 0
+	events := []StudentAttendanceEvent{}
+	entryDates := map[string]struct{}{}
+	exitDates := map[string]struct{}{}
 	for rows.Next() {
-		var date string
-		var tin, tout *string
-		if err := rows.Scan(&date, &tin, &tout); err != nil {
+		var e StudentAttendanceEvent
+		var tin, tout, rem *string
+		if err := rows.Scan(&e.Date, &e.Status, &tin, &tout, &rem); err != nil {
 			continue
 		}
-		status := "absent"
-		if tin != nil {
-			if *tin > cutoff {
-				status = "late"
-			} else {
-				status = "present"
-			}
+		e.TimeIn = tin
+		e.TimeOut = tout
+		if rem != nil && *rem != "" {
+			e.Remarks = *rem
 		}
-		events = append(events, StaffAttendanceEvent{Date: date, Status: status, TimeIn: tin, TimeOut: tout})
-		expected++
-		switch status {
-		case "present":
-			present++
-		case "late":
-			late++
-		case "absent":
-			absent++
+		events = append(events, e)
+		if e.Status == string(ScanEntry) {
+			entryDates[e.Date] = struct{}{}
+		} else if e.Status == string(ScanExit) {
+			exitDates[e.Date] = struct{}{}
 		}
 	}
+	// count working days with an entry scan as present
+	present := len(entryDates)
+	expected := present
+	late, absent := 0, 0
 	var pct float64
 	if expected > 0 {
 		pct = float64(present+late) / float64(expected) * 100

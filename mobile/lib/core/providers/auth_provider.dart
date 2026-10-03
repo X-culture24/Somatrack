@@ -79,6 +79,18 @@ class AuthProvider extends ChangeNotifier {
     return false;
   }
 
+  /// internal/api/auth.go's handleChangePassword — was a no-op menu item
+  /// on both the teacher and parent profile screens before this existed.
+  /// Throws ApiException with the server's message (e.g. wrong current
+  /// password) on failure.
+  Future<void> changePassword({required String currentPassword, required String newPassword}) async {
+    await api.post<void>(
+      '/auth/change-password/',
+      body: {'current_password': currentPassword, 'new_password': newPassword},
+      decode: (_) {},
+    );
+  }
+
   Future<void> logout() async {
     _user = null;
     _accessToken = null;

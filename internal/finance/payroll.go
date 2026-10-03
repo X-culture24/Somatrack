@@ -240,10 +240,14 @@ func (s *PayrollStore) GetEntryForDisbursement(ctx context.Context, entryID uuid
 var ErrEntryNotFound = errors.New("payroll entry not found")
 
 func (s *PayrollStore) MarkDisbursement(ctx context.Context, entryID uuid.UUID, status, ref string) error {
+	// $1::varchar cast is required — using the same placeholder once as a
+	// plain assignment and once inside a CASE/comparison confuses pgx's
+	// extended-protocol type inference ("inconsistent types deduced for
+	// parameter $1", SQLSTATE 42P08) without it.
 	_, err := s.pool.Exec(ctx, `
 		UPDATE payroll_entries
-		SET disbursement_status = $1, disbursement_ref = $2,
-		    disbursed_at = CASE WHEN $1 = 'success' THEN NOW() ELSE disbursed_at END
+		SET disbursement_status = $1::varchar, disbursement_ref = $2,
+		    disbursed_at = CASE WHEN $1::varchar = 'success' THEN NOW() ELSE disbursed_at END
 		WHERE id = $3`, status, ref, entryID)
 	return err
 }

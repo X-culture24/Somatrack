@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/models/school.dart';
 import '../../../core/providers/attendance_provider.dart';
@@ -18,6 +22,7 @@ class _FeesPageState extends State<FeesPage> {
   List<InvoiceSummary> _invoices = [];
   List<Student> _wards = [];
   bool _loading = true;
+  String? _downloadingId;
 
   @override
   void initState() {
@@ -35,6 +40,144 @@ class _FeesPageState extends State<FeesPage> {
   double get _totalDue => _invoices.fold(0, (s, i) => s + i.totalDue);
   double get _totalPaid => _invoices.fold(0, (s, i) => s + i.totalPaid);
   double get _balance => _totalDue - _totalPaid;
+
+  Future<void> _payFees(InvoiceSummary invoice) async {
+    final ward = _wards.cast<Student?>().firstWhere((w) => w?.id == invoice.studentId, orElse: () => null);
+    final amountCtrl = TextEditingController(
+      text: invoice.balance > 0 ? invoice.balance.toStringAsFixed(0) : invoice.totalDue.toStringAsFixed(0),
+    );
+    final phoneCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Pay Fees via M-Pesa'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (ward != null) Text('For ${ward.fullName}', style: const TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: amountCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Amount (KES)'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: phoneCtrl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'M-Pesa phone number',
+                hintText: '07XXXXXXXX',
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "You'll get a prompt on this phone to enter your M-Pesa PIN.",
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Send Prompt')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final amount = double.tryParse(amountCtrl.text.trim());
+    final phone = phoneCtrl.text.trim();
+    if (amount == null || amount <= 0 || phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid amount and phone number.')),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Expanded(child: Text('Sending M-Pesa prompt…')),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final att = context.read<AttendanceProvider>();
+      final requestId = await att.initiatePayment(studentId: invoice.studentId, phone: phone, amount: amount);
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop(); // close "sending" dialog
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 20),
+                Expanded(child: Text('Enter your M-Pesa PIN on your phone now…')),
+              ],
+            ),
+          ),
+        );
+      }
+      final result = await att.pollPaymentStatus(requestId);
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop(); // close "waiting" dialog
+
+      final status = result['status'] as String? ?? 'pending';
+      final desc = result['result_desc'] as String? ?? '';
+      if (status == 'success') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Payment received — thank you!'), backgroundColor: AppTheme.success),
+        );
+        _load();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(desc.isNotEmpty ? desc : 'Payment did not complete ($status).')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not start this payment: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _downloadStatement(InvoiceSummary invoice) async {
+    setState(() => _downloadingId = invoice.id);
+    try {
+      final bytes = await context.read<AttendanceProvider>().invoicePdfBytes(invoice.id);
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/invoice-${invoice.id}.pdf');
+      await file.writeAsBytes(bytes, flush: true);
+      if (!mounted) return;
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'application/pdf')],
+        subject: 'Fee statement',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not download this statement: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _downloadingId = null);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -120,29 +263,6 @@ class _FeesPageState extends State<FeesPage> {
               ),
             ),
             const SizedBox(height: 12),
-            const SectionHeader(title: 'Payment Actions'),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {},
-                      icon: const Icon(Icons.phone_android),
-                      label: const Text('M-Pesa Pay'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {},
-                      icon: const Icon(Icons.picture_as_pdf),
-                      label: const Text('Statement'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
             const SectionHeader(title: 'Invoices'),
             if (_loading)
               const Padding(
@@ -219,6 +339,26 @@ class _FeesPageState extends State<FeesPage> {
                     _item(
                         'Balance', currency.format(i.balance),
                         i.balance > 0 ? AppTheme.danger : AppTheme.success),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (i.balance > 0)
+                      FilledButton.icon(
+                        onPressed: () => _payFees(i),
+                        icon: const Icon(Icons.phone_android, size: 16),
+                        label: const Text('Pay via M-Pesa'),
+                      ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: _downloadingId == i.id ? null : () => _downloadStatement(i),
+                      icon: _downloadingId == i.id
+                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.picture_as_pdf, size: 16),
+                      label: Text(_downloadingId == i.id ? 'Preparing…' : 'Statement'),
+                    ),
                   ],
                 ),
               ],

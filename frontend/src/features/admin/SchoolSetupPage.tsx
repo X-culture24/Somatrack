@@ -20,15 +20,32 @@ export function SchoolSetupPage() {
   const { data: streams } = useQuery({ queryKey: ["streams"], queryFn: academicsApi.streams });
   const { data: subjects } = useQuery({ queryKey: ["subjects"], queryFn: () => academicsApi.subjects() });
 
-  const [yearForm, setYearForm] = useState({ name: "", start_date: "", end_date: "", is_current: false });
+  const EMPTY_YEAR = { name: "", start_date: "", end_date: "", is_active: false };
+  const [yearForm, setYearForm] = useState(EMPTY_YEAR);
+  const [editingYearId, setEditingYearId] = useState<string | null>(null);
   const [termForm, setTermForm] = useState({ academic_year: "", number: "1", start_date: "", end_date: "", is_current: false });
   const [streamName, setStreamName] = useState("");
   const [subjectForm, setSubjectForm] = useState({ name: "", code: "", level: "ALL", learning_area: "" });
 
   const createYear = useMutation({
     mutationFn: () => academicsApi.createYear(yearForm),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["academic-years"] }); setYearForm({ name: "", start_date: "", end_date: "", is_current: false }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["academic-years"] }); setYearForm(EMPTY_YEAR); },
+    onError: (err: any) => window.alert(err?.response?.data?.message ?? "Could not create — this name may already exist."),
   });
+  const updateYear = useMutation({
+    mutationFn: () => academicsApi.updateYear(editingYearId!, yearForm),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["academic-years"] }); setYearForm(EMPTY_YEAR); setEditingYearId(null); },
+    onError: (err: any) => window.alert(err?.response?.data?.message ?? "Could not save changes."),
+  });
+
+  function startEditYear(y: any) {
+    setEditingYearId(y.id);
+    setYearForm({ name: y.name, start_date: y.start_date, end_date: y.end_date, is_active: y.is_active });
+  }
+  function cancelEditYear() {
+    setEditingYearId(null);
+    setYearForm(EMPTY_YEAR);
+  }
   const createTerm = useMutation({
     mutationFn: () => academicsApi.createTerm(termForm),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["terms"] }); setTermForm({ ...termForm, start_date: "", end_date: "" }); },
@@ -42,9 +59,14 @@ export function SchoolSetupPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["subjects"] }); setSubjectForm({ name: "", code: "", level: "ALL", learning_area: "" }); },
   });
 
-  async function handleCreateYear() {
-    const ok = await confirm({ title: "Create academic year", message: `Create academic year "${yearForm.name}"?`, confirmLabel: "Create" });
-    if (ok) createYear.mutate();
+  async function handleSaveYear() {
+    const isEdit = Boolean(editingYearId);
+    const ok = await confirm({
+      title: isEdit ? "Save academic year changes" : "Create academic year",
+      message: isEdit ? `Save changes to "${yearForm.name}"?` : `Create academic year "${yearForm.name}"?`,
+      confirmLabel: isEdit ? "Save changes" : "Create",
+    });
+    if (ok) (isEdit ? updateYear : createYear).mutate();
   }
 
   return (
@@ -53,24 +75,36 @@ export function SchoolSetupPage() {
       <PageHeader title="School setup" subtitle="Academic years, terms, streams, and subjects that power the school year." />
 
       <Card>
-        <h3 className="mb-3 font-semibold text-[#1b365d]">Academic years</h3>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-semibold text-[#1b365d]">Academic years</h3>
+          {editingYearId && <Button variant="ghost" onClick={cancelEditYear}>Cancel edit</Button>}
+        </div>
+        <p className="mb-3 text-xs text-slate-500">
+          Academic years are preloaded — click "Edit" on a row below to change its dates or active status. The form below is only for adding a genuinely new year.
+        </p>
         <div className="grid gap-3 md:grid-cols-4">
           <Field label="Name"><Input placeholder="2027" value={yearForm.name} onChange={(e) => setYearForm({ ...yearForm, name: e.target.value })} /></Field>
           <Field label="Starts"><Input type="date" value={yearForm.start_date} onChange={(e) => setYearForm({ ...yearForm, start_date: e.target.value })} /></Field>
           <Field label="Ends"><Input type="date" value={yearForm.end_date} onChange={(e) => setYearForm({ ...yearForm, end_date: e.target.value })} /></Field>
-          <Field label="Current year">
-            <Select value={yearForm.is_current ? "yes" : "no"} onChange={(e) => setYearForm({ ...yearForm, is_current: e.target.value === "yes" })}>
+          <Field label="Active year">
+            <Select value={yearForm.is_active ? "yes" : "no"} onChange={(e) => setYearForm({ ...yearForm, is_active: e.target.value === "yes" })}>
               <option value="no">No</option>
-              <option value="yes">Yes — make current</option>
+              <option value="yes">Yes — make active</option>
             </Select>
           </Field>
         </div>
-        <Button className="mt-3" onClick={handleCreateYear} disabled={createYear.isPending || !yearForm.name}>
-          {createYear.isPending ? "Creating…" : "Create year"}
+        <Button className="mt-3" onClick={handleSaveYear} disabled={createYear.isPending || updateYear.isPending || !yearForm.name}>
+          {createYear.isPending || updateYear.isPending ? "Saving…" : editingYearId ? "Save changes" : "Create year"}
         </Button>
-        <Table headers={["Academic year", "Starts", "Ends", "Current"]}>
+        <Table headers={["Academic year", "Starts", "Ends", "Active", ""]}>
           {(years as any[] ?? []).map((y: any) => (
-            <tr key={y.id}><td className="px-4 py-2">{y.name}</td><td className="px-4 py-2">{y.start_date}</td><td className="px-4 py-2">{y.end_date}</td><td className="px-4 py-2">{y.is_current ? "Current" : ""}</td></tr>
+            <tr key={y.id} className={editingYearId === y.id ? "bg-[#4a9eca]/5" : ""}>
+              <td className="px-4 py-2">{y.name}</td>
+              <td className="px-4 py-2">{y.start_date}</td>
+              <td className="px-4 py-2">{y.end_date}</td>
+              <td className="px-4 py-2">{y.is_active ? "Active" : ""}</td>
+              <td className="px-4 py-2"><Button variant="ghost" onClick={() => startEditYear(y)}>Edit</Button></td>
+            </tr>
           ))}
         </Table>
       </Card>
@@ -147,7 +181,8 @@ export function SchoolSetupPage() {
 }
 
 export function TimetablePage() {
-  const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  // day_of_week is 1 (Monday) … 7 (Sunday).
+  const DAYS = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   return <ModulePage config={{
     title: "Timetable",
     subtitle: "See the teaching day across classes, subjects, and staff.",
@@ -156,9 +191,9 @@ export function TimetablePage() {
     columns: [
       { label: "Day", value: (r) => DAYS[r.day_of_week] ?? r.day_of_week },
       { label: "Time", value: (r) => `${r.start_time} - ${r.end_time}` },
-      { label: "Class", value: (r) => r.class_label || r.class_group },
-      { label: "Subject", value: (r) => r.subject_name || r.subject },
-      { label: "Teacher", value: (r) => r.teacher_name || "-" },
+      { label: "Class", value: (r) => r.class_id_label },
+      { label: "Subject", value: (r) => r.subject_id_label },
+      { label: "Teacher", value: (r) => r.teacher_id_label || "-" },
     ],
     stats: [{ label: "Lessons", value: (rows) => rows.length }],
   }} />;

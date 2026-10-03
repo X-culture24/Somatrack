@@ -1,20 +1,18 @@
 import { api, unwrap } from "./client";
 
+// Real routes (internal/api/finance_proxy.go): POST /payroll-runs/ both
+// creates the run AND generates every active staff member's payslip in one
+// call — there is no separate create/generate/approve/mark-paid workflow,
+// and entries are listed under the run (/payroll-runs/{id}/entries/), not
+// a flat /payroll-entries/?payroll=X the old Django-shaped client assumed.
 export const payrollApi = {
-  runs: (params?: Record<string, string>) =>
-    api.get("/payroll-runs/", { params }).then((r) => unwrap(r.data)),
-  run: (id: number) =>
-    api.get(`/payroll-runs/${id}/`).then((r) => r.data),
-  createRun: (data: unknown) =>
-    api.post("/payroll-runs/", data).then((r) => r.data),
-  generate: (id: number) =>
-    api.post(`/payroll-runs/${id}/generate/`).then((r) => r.data),
-  approve: (id: number) =>
-    api.post(`/payroll-runs/${id}/approve/`).then((r) => r.data),
-  markPaid: (id: number) =>
-    api.post(`/payroll-runs/${id}/mark_paid/`).then((r) => r.data),
-  entries: (params?: Record<string, string>) =>
-    api.get("/payroll-entries/", { params }).then((r) => unwrap(r.data)),
-  deductions: (params?: Record<string, string>) =>
-    api.get("/staff-deductions/", { params }).then((r) => unwrap(r.data)),
+  runs: () => api.get("/payroll-runs/").then((r) => unwrap(r.data)),
+  createRun: (data: { month: number; year: number }) =>
+    api.post("/payroll-runs/", data).then((r) => r.data as { run: any; entries: any[] }),
+  entries: (runId: string) =>
+    api.get(`/payroll-runs/${runId}/entries/`).then((r) => unwrap(r.data)),
+  disburse: (entryId: string) =>
+    api.post(`/payroll-entries/${entryId}/disburse/`).then((r) => r.data),
+  disburseEquity: (entryId: string) =>
+    api.post(`/payroll-entries/${entryId}/disburse/equity/`).then((r) => r.data),
 };

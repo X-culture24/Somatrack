@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 enum UserRole {
   systemAdmin,
   schoolDirector,
@@ -139,7 +141,7 @@ class LoginResponse {
     return LoginResponse(
       accessToken: json['access'] ?? json['access_token'] ?? json['token'] ?? '',
       refreshToken: json['refresh'] ?? json['refresh_token'],
-      user: AppUser.fromJson(userJson is Map<String, dynamic> ? userJson : <String, dynamic>{}),
+      user: AppUser.fromJson(userJson is Map ? userJson : {}),
     );
   }
 }

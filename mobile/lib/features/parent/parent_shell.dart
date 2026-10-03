@@ -9,6 +9,7 @@ import 'wards_page.dart';
 import 'announcements_page.dart';
 import 'fees_page.dart';
 import 'profile_page.dart';
+import 'class_work_page.dart';
 
 class ParentShell extends StatefulWidget {
   final Widget child;
@@ -44,7 +45,9 @@ class _ParentShellState extends State<ParentShell> {
         ),
         actions: [
           IconButton(
-            onPressed: () {},
+            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('No new notifications.')),
+            ),
             icon: const Icon(Icons.notifications_outlined),
             tooltip: 'Notifications',
           ),
@@ -151,24 +154,36 @@ class _ParentShellState extends State<ParentShell> {
       ListTile(
         leading: const Icon(Icons.menu_book_outlined),
         title: const Text('Academic Progress'),
-        onTap: () => Navigator.pop(context),
+        onTap: () {
+          Navigator.pop(context);
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ClassWorkPage()),
+          );
+        },
       ),
       ListTile(
         leading: const Icon(Icons.directions_bus_outlined),
         title: const Text('Transport'),
-        onTap: () => Navigator.pop(context),
+        onTap: () => _popThenComingSoon(),
       ),
       ListTile(
         leading: const Icon(Icons.menu_book_sharp),
         title: const Text('Library'),
-        onTap: () => Navigator.pop(context),
+        onTap: () => _popThenComingSoon(),
       ),
       ListTile(
         leading: const Icon(Icons.chat_bubble_outline),
         title: const Text('Messages'),
-        onTap: () => Navigator.pop(context),
+        onTap: () => _popThenComingSoon(),
       ),
     ];
+  }
+
+  void _popThenComingSoon() {
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Coming soon.')),
+    );
   }
 }
 

@@ -1,5 +1,85 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../core/providers/auth_provider.dart';
+import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
+
+/// Shared by both the teacher and parent profile screens — was a no-op
+/// "Change Password" menu item on each before AuthProvider.changePassword
+/// (and the real backend behind it) existed.
+Future<void> showChangePasswordDialog(BuildContext context) async {
+  final currentCtrl = TextEditingController();
+  final newCtrl = TextEditingController();
+  final confirmCtrl = TextEditingController();
+  String? error;
+
+  await showDialog(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setState) => AlertDialog(
+        title: const Text('Change Password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (error != null) ...[
+              Text(error!, style: const TextStyle(color: AppTheme.danger, fontSize: 13)),
+              const SizedBox(height: 10),
+            ],
+            TextField(
+              controller: currentCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Current password'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: newCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'New password (min 8 characters)'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: confirmCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Confirm new password'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              if (newCtrl.text != confirmCtrl.text) {
+                setState(() => error = "New passwords don't match.");
+                return;
+              }
+              if (newCtrl.text.length < 8) {
+                setState(() => error = 'New password must be at least 8 characters.');
+                return;
+              }
+              try {
+                await dialogContext.read<AuthProvider>().changePassword(
+                      currentPassword: currentCtrl.text,
+                      newPassword: newCtrl.text,
+                    );
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Password changed successfully.'), backgroundColor: AppTheme.success),
+                  );
+                }
+              } on ApiException catch (e) {
+                setState(() => error = e.message);
+              } catch (e) {
+                setState(() => error = 'Could not change password: $e');
+              }
+            },
+            child: const Text('Change Password'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
 
 class StatusChip extends StatelessWidget {
   final String label;

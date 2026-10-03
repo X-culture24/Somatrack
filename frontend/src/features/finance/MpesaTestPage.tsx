@@ -1,28 +1,41 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { api } from "../../api/client";
-import { Button, Card, Field, Input, PageHeader, useConfirm } from "../../components/ui";
+import { paymentsApi } from "../../api/finance";
+import { studentsApi } from "../../api/students";
+import { Button, Card, Field, Input, PageHeader, Select, useConfirm } from "../../components/ui";
 
 export function MpesaTestPage() {
   const { confirm, dialog } = useConfirm();
-  const [form, setForm] = useState({
-    amount: "5000",
-    account_ref: "137101#FAITHOTIENO",
-    trans_id: "",
-    phone: "254712345678",
-  });
+  const { data: students } = useQuery({ queryKey: ["students", ""], queryFn: () => studentsApi.list() });
+  const [studentId, setStudentId] = useState("");
+  const [amount, setAmount] = useState("5000");
+  const [phone, setPhone] = useState("254708374149");
+  const [payerName, setPayerName] = useState("");
   const [result, setResult] = useState<any>(null);
 
+  const selected: any = (students ?? []).find((s: any) => s.id === studentId);
+  // The real listener matches on the payer's name in the M-Pesa account
+  // reference, not the student id — so we send the learner's name, exactly
+  // like a parent typing it into the Paybill account-number field.
+  const billRef = selected ? `${selected.first_name} ${selected.last_name}` : "";
+
   const fire = useMutation({
-    mutationFn: () => api.post("/webhooks/mpesa/test/", form).then((r) => r.data),
+    mutationFn: () =>
+      paymentsApi.simulate({
+        amount: Number(amount),
+        bill_ref_number: billRef,
+        phone,
+        payer_name: payerName || undefined,
+      }),
     onSuccess: (data) => setResult(data),
   });
 
   async function handleFire() {
+    if (!selected) return;
     const ok = await confirm({
-      title: "Fire test M-Pesa payment",
-      message: `Simulate KES ${form.amount} from account ref "${form.account_ref}". This will run the full fee listener pipeline.`,
-      confirmLabel: "Fire webhook",
+      title: "Simulate M-Pesa payment",
+      message: `Simulate KES ${amount} paid for ${selected.full_name}? This runs the real fee-listener pipeline (match → post payment → update invoice).`,
+      confirmLabel: "Fire payment",
     });
     if (ok) { setResult(null); fire.mutate(); }
   }
@@ -31,61 +44,69 @@ export function MpesaTestPage() {
     <div className="max-w-xl space-y-5">
       {dialog}
       <PageHeader
-        title="M-Pesa fee listener test"
-        subtitle="Simulate a Safaricom C2B confirmation to test the full webhook → match → balance update pipeline."
+        title="Simulate a fee payment"
+        subtitle="Fires a Safaricom-shaped payment through the real listener pipeline — for demos and manual QA, without needing an actual M-Pesa transaction."
       />
 
       <Card>
-        <h3 className="mb-3 font-semibold text-[#1b365d]">Simulated payment payload</h3>
+        <h3 className="mb-3 font-semibold text-[#1b365d]">Payment details</h3>
         <div className="grid gap-3">
+          <Field label="Learner">
+            <Select value={studentId} onChange={(e) => setStudentId(e.target.value)}>
+              <option value="">Select learner…</option>
+              {(students ?? []).map((s: any) => (
+                <option key={s.id} value={s.id}>{s.full_name} ({s.admission_no})</option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Amount (KES)">
-            <Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+            <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </Field>
-          <Field label="BillRefNumber (account ref)">
-            <Input value={form.account_ref} onChange={(e) => setForm({ ...form, account_ref: e.target.value })}
-              placeholder="137101#CHILDNAME" />
+          <Field label="Payer phone (M-Pesa MSISDN)">
+            <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
           </Field>
-          <Field label="TransID (leave blank for random)">
-            <Input value={form.trans_id} onChange={(e) => setForm({ ...form, trans_id: e.target.value })}
-              placeholder="e.g. TEST001 — blank = auto" />
-          </Field>
-          <Field label="MSISDN (payer phone)">
-            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          <Field label="Payer name (optional, for the payment record)">
+            <Input value={payerName} onChange={(e) => setPayerName(e.target.value)} placeholder="e.g. parent's name" />
           </Field>
         </div>
 
+        {billRef && (
+          <p className="mt-3 text-xs text-slate-500">
+            Will send account reference <span className="font-mono font-medium text-slate-700">"{billRef}"</span> —
+            the same field a parent enters at a Paybill terminal.
+          </p>
+        )}
+
         <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
-          <p className="font-medium text-slate-600 mb-1">How it works</p>
+          <p className="mb-1 font-medium text-slate-600">How it works</p>
           <ol className="list-decimal list-inside space-y-0.5">
-            <li>POST fires a Safaricom-shaped JSON to the confirmation endpoint.</li>
-            <li>Event saved to WebhookEvent table with status <code>pending</code>.</li>
-            <li>Background worker parses <code>BillRefNumber</code>, strips prefix <code>137101#</code>.</li>
-            <li>Fuzzy-matches name against active students (threshold 80%).</li>
-            <li>If matched → creates Payment + updates invoice balance atomically.</li>
-            <li>If unmatched → appears in Unreconciled queue.</li>
+            <li>Sends a Safaricom-shaped confirmation to the real payment service.</li>
+            <li>Event recorded, then matched by fuzzy name match (≥80% confidence) against active students.</li>
+            <li>If matched → posts a payment and recomputes the student's invoice balance atomically.</li>
+            <li>If unmatched → the event is flagged for manual review instead.</li>
           </ol>
         </div>
 
-        <Button className="mt-4 w-full" onClick={handleFire} disabled={fire.isPending}>
-          {fire.isPending ? "Firing…" : "🔥 Fire test webhook"}
+        <Button className="mt-4 w-full" onClick={handleFire} disabled={fire.isPending || !selected}>
+          {fire.isPending ? "Firing…" : "Fire simulated payment"}
         </Button>
       </Card>
 
       {result && (
         <Card>
-          <p className="mb-2 font-semibold text-green-600">✓ Webhook queued</p>
+          {result.reconciliation_status === "posted" ? (
+            <p className="mb-2 font-semibold text-green-600">Payment matched and posted</p>
+          ) : (
+            <p className="mb-2 font-semibold text-yellow-600">Payment recorded but not matched — check Unreconciled</p>
+          )}
           <dl className="space-y-1 text-sm">
-            <div className="flex justify-between"><dt className="text-slate-500">Event ID</dt><dd className="font-mono font-medium">#{result.event_id}</dd></div>
-            <div className="flex justify-between"><dt className="text-slate-500">TransID</dt><dd className="font-mono">{result.trans_id}</dd></div>
-            <div className="flex justify-between"><dt className="text-slate-500">Amount</dt><dd>KES {result.payload?.TransAmount}</dd></div>
-            <div className="flex justify-between"><dt className="text-slate-500">Account ref</dt><dd>{result.payload?.BillRefNumber}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Payment ID</dt><dd className="font-mono text-xs">{result.payment_id ?? "—"}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Invoice ID</dt><dd className="font-mono text-xs">{result.invoice_id ?? "—"}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Status</dt><dd>{result.reconciliation_status}</dd></div>
           </dl>
           <p className="mt-3 text-xs text-slate-400">
-            Check Unreconciled Payments if the student name didn't match, or refresh Invoices to see the updated balance.
+            Open Invoices to see the updated balance — it auto-refreshes every 5 seconds.
           </p>
-          <div className="mt-3 rounded-xl bg-slate-50 p-3 text-xs font-mono text-slate-600 overflow-x-auto whitespace-pre">
-            {JSON.stringify(result.payload, null, 2)}
-          </div>
         </Card>
       )}
     </div>

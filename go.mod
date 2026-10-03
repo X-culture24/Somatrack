@@ -11,6 +11,8 @@ require (
 	github.com/hibiken/asynq v0.24.1
 	github.com/jackc/pgx/v5 v5.7.1
 	github.com/joho/godotenv v1.5.1
+	github.com/jung-kurt/gofpdf v1.16.2
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.28.0
 	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4
 )

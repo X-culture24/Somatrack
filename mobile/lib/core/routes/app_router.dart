@@ -7,7 +7,6 @@ import '../../features/parent/parent_shell.dart';
 import '../../features/parent/parent_home_page.dart';
 import '../../features/teacher/teacher_shell.dart';
 import '../../features/teacher/teacher_home_page.dart';
-import '../../features/teacher/teacher_my_attendance_page.dart';
 import '../../features/student/student_home.dart';
 
 class AppRouter {
@@ -16,7 +15,7 @@ class AppRouter {
       initialLocation: '/',
       refreshListenable: auth,
       redirect: (context, state) {
-        final loggingIn = state.matchedLocation == '/login';
+        final loggingIn = state.subloc == '/login';
         if (auth.isLoading) return null;
         final authenticated = auth.isAuthenticated;
         if (!authenticated && !loggingIn) return '/login';
@@ -38,29 +37,26 @@ class AppRouter {
           builder: (_, __) => const LoginPage(),
         ),
         ShellRoute(
+          path: '/parent',
           builder: (_, state, child) => ParentShell(child: child),
           routes: [
             GoRoute(
-              path: '/parent',
+              path: '',
               name: 'parent-home',
               builder: (_, __) => const ParentHomePage(),
             ),
           ],
         ),
         ShellRoute(
+          path: '/teacher',
           builder: (_, state, child) => TeacherShell(child: child),
           routes: [
             GoRoute(
-              path: '/teacher',
+              path: '',
               name: 'teacher-home',
               builder: (_, __) => const TeacherHomePage(),
             ),
           ],
-        ),
-        GoRoute(
-          path: '/teacher/attendance',
-          name: 'teacher-my-attendance',
-          builder: (_, __) => const TeacherMyAttendancePage(),
         ),
         GoRoute(
           path: '/student',

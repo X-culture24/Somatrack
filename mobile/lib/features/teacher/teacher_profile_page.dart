@@ -2,8 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/providers/attendance_provider.dart';
 import '../../../core/providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets.dart';
+
+void _comingSoon(BuildContext context) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Coming soon.')),
+  );
+}
+
+void _showAbout(BuildContext context) {
+  showAboutDialog(
+    context: context,
+    applicationName: "ACK St. Mary's Kabete",
+    applicationVersion: '1.0.0',
+    applicationLegalese: 'Staff Portal',
+  );
+}
 
 class TeacherProfilePage extends StatelessWidget {
   const TeacherProfilePage({super.key});
@@ -12,6 +29,7 @@ class TeacherProfilePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final user = auth.user;
+    final classCount = context.watch<AttendanceProvider>().myClasses.length;
     return Scaffold(
       body: ListView(
         children: [
@@ -63,20 +81,20 @@ class TeacherProfilePage extends StatelessWidget {
           _section('Staff Information'),
           _item(Icons.badge_outlined, 'TSC No.', '—'),
           _item(Icons.work_outline, 'Department', '—'),
-          _item(Icons.class_outlined, 'Classes Assigned', ''),
+          _item(Icons.class_outlined, 'Classes Assigned', '$classCount'),
           _item(Icons.phone_android_outlined, 'Mobile', user?.phoneNumber ?? '—'),
           _item(Icons.fingerprint, 'My Attendance',
               () => context.push('/teacher/attendance')),
           const SizedBox(height: 8),
           _section('Account'),
-          _item(Icons.security_outlined, 'Change Password', () {}),
-          _item(Icons.notifications_active_outlined, 'Notification Preferences', () {}),
-          _item(Icons.language_outlined, 'Language / Locale', () {}),
+          _item(Icons.security_outlined, 'Change Password', () => showChangePasswordDialog(context)),
+          _item(Icons.notifications_active_outlined, 'Notification Preferences', () => _comingSoon(context)),
+          _item(Icons.language_outlined, 'Language / Locale', () => _comingSoon(context)),
           const SizedBox(height: 8),
           _section('Support'),
-          _item(Icons.help_outline, 'Help & Documentation', () {}),
-          _item(Icons.bug_report_outlined, 'Report an Issue', () {}),
-          _item(Icons.info_outline, 'About the App', () {}),
+          _item(Icons.help_outline, 'Help & Documentation', () => _comingSoon(context)),
+          _item(Icons.bug_report_outlined, 'Report an Issue', () => _comingSoon(context)),
+          _item(Icons.info_outline, 'About the App', () => _showAbout(context)),
           const SizedBox(height: 20),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),

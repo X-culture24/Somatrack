@@ -3,6 +3,8 @@ import { useState } from "react";
 import { schoolApi } from "../../api/school";
 import { Badge, Button, Card, Field, Input, PageHeader, Select, Table, useConfirm } from "../../components/ui";
 
+// Must match internal/shared/types.Role exactly — the backend rejects
+// anything outside this set.
 const ROLES = [
   "SYSTEM_ADMIN", "SCHOOL_DIRECTOR", "FINANCE_OFFICER", "HEAD_TEACHER", "DEPUTY_HEAD_TEACHER",
   "ACADEMIC_COORDINATOR", "CLASS_TEACHER", "SUBJECT_TEACHER", "LIBRARIAN", "TRANSPORT_COORDINATOR",
@@ -16,15 +18,19 @@ export function UsersPage() {
   const [form, setForm] = useState({
     first_name: "", last_name: "", email: "", role: "CLASS_TEACHER", phone: "", password: "",
   });
+  const [tempPassword, setTempPassword] = useState<{ email: string; password: string } | null>(null);
 
   const create = useMutation({
     mutationFn: () => schoolApi.createUser(form),
-    onSuccess: () => {
+    onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["users"] });
+      if (result.temporary_password) {
+        setTempPassword({ email: result.user.email, password: result.temporary_password });
+      }
       setForm({ first_name: "", last_name: "", email: "", role: "CLASS_TEACHER", phone: "", password: "" });
     },
     onError: (err: any) => {
-      window.alert(err?.response?.data?.email?.[0] ?? err?.response?.data?.detail ?? "Could not create the account. Check the email is unique.");
+      window.alert(err?.response?.data?.message ?? "Could not create the account. Check the email is unique.");
     },
   });
   const toggleActive = useMutation({
@@ -38,7 +44,7 @@ export function UsersPage() {
       message: `Create a ${form.role.replaceAll("_", " ").toLowerCase()} account for ${form.first_name} ${form.last_name} (${form.email})?`,
       confirmLabel: "Create account",
     });
-    if (ok) create.mutate();
+    if (ok) { setTempPassword(null); create.mutate(); }
   }
 
   async function handleToggle(u: any) {
@@ -54,7 +60,17 @@ export function UsersPage() {
   return (
     <div className="space-y-6">
       {dialog}
-      <PageHeader title="Users & roles" subtitle="RBAC accounts for all fourteen school roles." />
+      <PageHeader title="Users & roles" subtitle="RBAC accounts for all school roles." />
+
+      {tempPassword && (
+        <Card className="border-2 border-[#4a9eca]">
+          <p className="font-semibold text-[#1b365d]">Account created — share this password now</p>
+          <p className="mt-1 text-sm text-slate-600">
+            This is the only time the password is shown. {tempPassword.email} will be asked to change it on first login.
+          </p>
+          <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 font-mono text-sm">{tempPassword.password}</p>
+        </Card>
+      )}
 
       <Card>
         <h3 className="mb-3 font-semibold text-[#1b365d]">New account</h3>

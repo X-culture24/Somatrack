@@ -1,14 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { schoolApi } from "../../api/school";
+import { GRADE_LABELS } from "../../api/finance";
 import { Card, Field, PageHeader, Select } from "../../components/ui";
 
-const GRADES = [
-  "Playgroup", "Pre-Primary 1", "Pre-Primary 2",
-  "Grade 1", "Grade 2", "Grade 3",
-  "Grade 4", "Grade 5", "Grade 6",
-  "Grade 7", "Grade 8", "Grade 9",
-];
+const GRADES = Object.values(GRADE_LABELS);
 
 const AREA_COLORS: Record<string, string> = {
   Languages: "bg-blue-100 text-blue-700",

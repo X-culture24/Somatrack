@@ -38,3 +38,7 @@ analyzer:
   errors:
     missing_required_param: error
     missing_return: error
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true

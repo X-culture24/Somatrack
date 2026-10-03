@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS cbc_signoffs;
+ALTER TABLE marks DROP COLUMN IF EXISTS reflection;

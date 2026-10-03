@@ -1,0 +1,1 @@
+ALTER TABLE subjects ADD COLUMN IF NOT EXISTS learning_area VARCHAR(50) NOT NULL DEFAULT 'General';

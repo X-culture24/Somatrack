@@ -13,6 +13,8 @@ staticfiles/
 # Env / secrets
 .env
 .env.local
+secrets/
+*.pem
 
 # Go build output
 /bin/
@@ -35,3 +37,7 @@ frontend/playwright-report/
 
 # OS
 .DS_Store
+
+# Test coverage output (make cover)
+coverage.out
+coverage.html

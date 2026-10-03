@@ -1,15 +1,21 @@
 import 'package:flutter/material.dart';
 
+// Matches the web admin dashboard's brand palette exactly
+// (frontend/src/components/ui/index.tsx) — the mobile app was previously on
+// an unrelated dark-green Material default instead of the school's actual
+// navy/sky-blue identity.
 class AppTheme {
-  static const Color primary = Color(0xFF1B5E20);
-  static const Color primaryLight = Color(0xFF4CAF50);
-  static const Color primaryDark = Color(0xFF0E3B11);
-  static const Color accent = Color(0xFFFFD600);
+  static const Color primary = Color(0xFF1B365D); // navy — headers, primary buttons
+  static const Color primaryLight = Color(0xFF4A9ECA); // sky blue — accents, active states
+  static const Color primaryDark = Color(0xFF152A49); // navy hover
+  static const Color accent = Color(0xFF4A9ECA);
+  static const Color accentHover = Color(0xFF3A8BB8);
+  static const Color gold = Color(0xFFC9A24B);
   static const Color danger = Color(0xFFC62828);
-  static const Color warning = Color(0xFFFF8F00);
-  static const Color info = Color(0xFF1565C0);
+  static const Color warning = Color(0xFFB8860B);
+  static const Color info = Color(0xFF4A9ECA);
   static const Color success = Color(0xFF2E7D32);
-  static const Color bgScaffold = Color(0xFFF5F7F5);
+  static const Color bgScaffold = Color(0xFFF5F7F9);
 
   static ThemeData get light {
     return ThemeData(

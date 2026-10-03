@@ -34,13 +34,15 @@ func main() {
 	}
 	defer db.Close()
 
-	smsBackend := getEnvStr("SMS_BACKEND", cfg.EmailBackend)
+	smsBackend := getEnvStr("SMS_BACKEND", "console")
 	smsSender := &notifications.SMSSender{
 		Backend:   smsBackend,
-		APIKey:    os.Getenv("SMS_API_KEY"),
-		APISender: getEnvStr("SMS_SENDER", "STMARYS"),
+		APIKey:    getEnvStr("SMS_API_KEY", os.Getenv("AFRICAS_TALKING_API_KEY")),
+		Username:  getEnvStr("AFRICAS_TALKING_USERNAME", "sandbox"),
+		APISender: os.Getenv("SMS_SENDER"),
 		APIURL:    os.Getenv("SMS_API_URL"),
 	}
+	log.Printf("sms backend: %s", smsBackend)
 	smtpPort, _ := strconv.Atoi(getEnvStr("SMTP_PORT", "587"))
 	emailSender := &notifications.EmailSender{
 		Backend:      cfg.EmailBackend,

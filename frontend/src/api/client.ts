@@ -54,6 +54,27 @@ api.interceptors.response.use(
   },
 );
 
-export function unwrap<T>(data: { results?: T[] } | T[]): T[] {
-  return Array.isArray(data) ? data : data.results ?? [];
+// The direct-to-DB resources (students, guardians, academics, clubs...) wrap
+// list responses as { results: [...] }; the finance/payroll endpoints
+// (backed by finance-svc via RPC) use { data: [...] } instead. Same shape,
+// different key — this helper accepts either so callers don't need to know
+// which family a given endpoint belongs to.
+export function unwrap<T>(data: { results?: T[]; data?: T[] } | T[]): T[] {
+  return Array.isArray(data) ? data : data.results ?? data.data ?? [];
+}
+
+// Fetches a binary file (PDF) through the authenticated axios instance —
+// a plain <a href> can't carry the Bearer token — then saves it via a
+// throwaway object URL, the standard way to trigger a browser download
+// from JS-fetched bytes.
+export async function downloadFile(url: string, filename: string) {
+  const res = await api.get(url, { responseType: "blob" });
+  const blobUrl = window.URL.createObjectURL(res.data);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(blobUrl);
 }

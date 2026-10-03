@@ -8,6 +8,7 @@ import '../../../core/providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets.dart';
 import 'child_attendance_page.dart';
+import 'wards_page.dart';
 
 class ParentHomePage extends StatefulWidget {
   const ParentHomePage({super.key});
@@ -19,6 +20,7 @@ class ParentHomePage extends StatefulWidget {
 class _ParentHomePageState extends State<ParentHomePage> {
   List<Student> _wards = [];
   List<Announcement> _announcements = [];
+  List<InvoiceSummary> _invoices = [];
   DailyAttendanceSummary? _todaySummary;
   bool _loading = true;
 
@@ -33,6 +35,7 @@ class _ParentHomePageState extends State<ParentHomePage> {
     _wards = await att.myWards();
     _announcements = await att.announcements();
     _todaySummary = await att.dailySummary();
+    _invoices = await att.myInvoices();
     if (mounted) {
       setState(() => _loading = false);
     }
@@ -111,7 +114,7 @@ class _ParentHomePageState extends State<ParentHomePage> {
           SectionHeader(
             title: 'My Children',
             actionLabel: 'View all',
-            onAction: () {},
+            onAction: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WardsPage())),
           ),
           if (_wards.isEmpty)
             const Padding(
@@ -138,7 +141,7 @@ class _ParentHomePageState extends State<ParentHomePage> {
   }
 
   double _feesBalance() {
-    return 0.0;
+    return _invoices.fold(0.0, (sum, i) => sum + i.balance);
   }
 
   Widget _buildTodayAttendance() {

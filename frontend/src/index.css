@@ -1,10 +1,140 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-muted-2: var(--muted-2);
+  --color-muted-2-foreground: var(--muted-2-foreground);
+  --color-transparent: transparent;
+  --radius-xs: calc(var(--radius) - 4px);
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1400px;
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-border-beam: border-beam calc(var(--duration)*1s) infinite linear;
+  --animate-fade-in-out: fade-in-out 4s ease-in-out;
+  --animate-fade-in: fade-in 0.7s ease-out forwards;
+  --animate-progress: progress 8s linear;
+  --animate-infinite-slider: infiniteSlider 20s linear infinite;
+  --animate-infinite-slider-reverse: infiniteSliderReverse 20s linear infinite;
+  --animate-shadow-ping: shadow-ping 1.5s ease-in-out infinite;
+  --animate-flip-btn: flip-btn 6s infinite steps(2, end);
+  --animate-rotate-btn: rotate-btn 3s linear infinite both;
+  --animate-light-to-right-top: light-to-right 4s linear infinite;
+  --animate-light-to-right-bottom: light-to-right 4s linear infinite;
+  --animate-marquee: marquee 25s linear infinite;
+  --animate-slide-to-right: slide-to-right 3s linear infinite;
+  --animate-slide-to-top: slide-to-top 3s linear infinite;
+  --animate-shimmer-slide: shimmer-slide var(--speed) ease-in-out infinite alternate;
+  --animate-spin-around: spin-around calc(var(--speed) * 2) infinite linear;
+  --animate-shine: shine var(--duration) infinite linear;
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+  --font-cursive: var(--font-cursive);
+  --font-playfair: "Playfair Display", serif;
+  --font-caveat: "Caveat", cursive;
+}
 
 :root {
   --navy:       #1b365d;   /* ACK St. Mary's navy — primary brand */
   --light-blue: #4a9eca;   /* School light blue — accent / interactive */
   --sky-bg:     #f0f4f8;   /* Very light blue-grey — page background */
   --white:      #ffffff;
+
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(220 20% 12%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(220 20% 12%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(220 20% 12%);
+  --primary: hsl(210 60% 23%);  /* Navy */
+  --primary-foreground: hsl(0 0% 98%);
+  --secondary: hsl(210 25% 96%);
+  --secondary-foreground: hsl(220 20% 12%);
+  --muted: hsl(210 25% 96%);
+  --muted-foreground: hsl(220 10% 38%);
+  --accent: hsl(199 65% 55%);  /* Light blue */
+  --accent-foreground: hsl(220 20% 12%);
+  --destructive: hsl(0 72% 51%);
+  --destructive-foreground: hsl(0 0% 98%);
+  --border: hsl(214 20% 88%);
+  --input: hsl(214 20% 88%);
+  --ring: hsl(210 60% 23%);
+  --radius: 8px;
+  --chart-1: hsl(210 60% 35%);
+  --chart-2: hsl(199 65% 48%);
+  --chart-3: hsl(210 80% 24%);
+  --chart-4: hsl(205 80% 60%);
+  --chart-5: hsl(199 70% 35%);
+  --sidebar: hsl(210 40% 98%);
+  --sidebar-foreground: hsl(220 20% 18%);
+  --sidebar-primary: hsl(210 60% 23%);
+  --sidebar-primary-foreground: hsl(0 0% 98%);
+  --sidebar-accent: hsl(210 35% 95%);
+  --sidebar-accent-foreground: hsl(210 60% 23%);
+  --sidebar-border: hsl(214 25% 90%);
+  --sidebar-ring: hsl(217 91% 60%);
+  --muted-2: hsl(210 25% 92%);
+  --muted-2-foreground: hsl(220 10% 40%);
+  --gradient-1: hsl(210 60% 40%);
+  --gradient-2: hsl(199 65% 55%);
+  --gradient-3: hsl(210 80% 30%);
+  --font-sans: "Roboto", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Roboto Serif", "Georgia", serif;
+  --font-mono: "Roboto Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-cursive: "Caveat", cursive;
+}
+
+html, body {
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.dark {
+  --background: hsl(215 60% 7%);
+  --foreground: hsl(210 25% 96%);
+  --card: hsl(215 50% 10%);
+  --card-foreground: hsl(210 25% 96%);
+  --popover: hsl(215 50% 10%);
+  --popover-foreground: hsl(210 25% 96%);
+  --primary: hsl(200 70% 75%);
+  --primary-foreground: hsl(215 60% 10%);
+  --secondary: hsl(215 40% 17%);
+  --secondary-foreground: hsl(210 25% 96%);
+  --muted: hsl(215 40% 17%);
+  --muted-foreground: hsl(214 15% 68%);
+  --accent: hsl(199 72% 55%);
+  --accent-foreground: hsl(215 60% 10%);
+  --destructive: hsl(0 55% 48%);
+  --destructive-foreground: hsl(210 25% 96%);
+  --border: hsl(215 35% 22%);
+  --input: hsl(215 35% 22%);
+  --ring: hsl(200 70% 70%);
+  --chart-1: hsl(200 70% 62%);
+  --chart-2: hsl(210 60% 50%);
+  --chart-3: hsl(199 80% 40%);
+  --chart-4: hsl(205 75% 70%);
+  --chart-5: hsl(215 55% 35%);
+  --sidebar: hsl(215 55% 9%);
+  --sidebar-foreground: hsl(210 25% 90%);
+  --sidebar-primary: hsl(200 70% 62%);
+  --sidebar-primary-foreground: hsl(215 60% 10%);
+  --sidebar-accent: hsl(215 45% 16%);
+  --sidebar-accent-foreground: hsl(200 70% 75%);
+  --sidebar-border: hsl(215 35% 20%);
+  --sidebar-ring: hsl(200 80% 65%);
+  --muted-2: hsl(215 35% 18%);
+  --muted-2-foreground: hsl(214 15% 72%);
+  --gradient-1: hsl(210 60% 40%);
+  --gradient-2: hsl(199 72% 55%);
+  --gradient-3: hsl(215 65% 28%);
 }
 
 body {
@@ -23,4 +153,307 @@ body {
 *:focus-visible {
   outline: 2px solid var(--light-blue);
   outline-offset: 2px;
+}
+
+/* Keyframe animations */
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
+@keyframes border-beam {
+  to {
+    offset-distance: 100%;
+  }
+}
+
+@keyframes fade-in-out {
+  0% {
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes progress {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+@keyframes infiniteSlider {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-250px * 5));
+  }
+}
+
+@keyframes infiniteSliderReverse {
+  0% {
+    transform: translateX(calc(-250px * 5));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shadow-ping {
+  0% {
+    box-shadow: 0 0 0 0px theme("colors.neutral.100");
+  }
+  50% {
+    box-shadow: 0 0 0 12px theme("colors.neutral.300");
+  }
+  100% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+
+@keyframes flip-btn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes rotate-btn {
+  to {
+    transform: rotate(90deg);
+  }
+}
+
+@keyframes slide-to-right {
+  0% {
+    opacity: 0;
+    left: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    left: 80%;
+  }
+}
+
+@keyframes slide-to-top {
+  0% {
+    opacity: 0;
+    bottom: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    bottom: 80%;
+  }
+}
+
+@keyframes light-to-right {
+  0% {
+    transform: translate(0%);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(100%);
+    opacity: 0;
+  }
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes shimmer-slide {
+  to {
+    transform: translate(calc(100cqw - 100%), 0);
+  }
+}
+
+@keyframes spin-around {
+  0% {
+    transform: translateZ(0) rotate(0);
+  }
+  15%,
+  35% {
+    transform: translateZ(0) rotate(90deg);
+  }
+  65%,
+  85% {
+    transform: translateZ(0) rotate(270deg);
+  }
+  100% {
+    transform: translateZ(0) rotate(360deg);
+  }
+}
+
+@keyframes shine {
+  0% {
+    background-position: 0% 0%;
+  }
+  50% {
+    background-position: 100% 100%;
+  }
+  to {
+    background-position: 0% 0%;
+  }
+}
+
+@keyframes fade-in-scale {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes transform1 {
+  0%, 25%, 100% {
+    width: 100%;
+    padding-bottom: 120%;
+  }
+  33.33%, 58.33% {
+    width: 0%;
+    padding-bottom: 0%;
+  }
+  66.66%, 91.66% {
+    width: 90%;
+    padding-bottom: 100%;
+  }
+}
+
+@keyframes transform2 {
+  0%, 25%, 100% {
+    width: 65%;
+    padding-bottom: 65%;
+  }
+  33.33%, 58.33% {
+    width: 95%;
+    padding-bottom: 114%;
+  }
+  66.66%, 91.66% {
+    width: 52%;
+    padding-bottom: 52%;
+  }
+}
+
+@keyframes transform3 {
+  0%, 25%, 100% {
+    width: 78%;
+    padding-bottom: 100%;
+  }
+  33.33%, 58.33% {
+    width: 78%;
+    padding-bottom: 94%;
+  }
+  66.66%, 91.66% {
+    width: 95%;
+    padding-bottom: 76%;
+  }
+}
+
+@keyframes transform4 {
+  0%, 25%, 66.66%, 91.66%, 100% {
+    width: 0%;
+    padding-bottom: 0%;
+  }
+  33.33%, 58.33% {
+    width: 65%;
+    padding-bottom: 46%;
+  }
+}
+
+@keyframes image1 {
+  0%, 25%, 100% {
+    opacity: 1;
+  }
+  33.33%, 58.33%, 66.66%, 91.66% {
+    opacity: 0;
+  }
+}
+
+@keyframes image2 {
+  0%, 25%, 33.33%, 58.33%, 100% {
+    opacity: 0;
+  }
+  66.66%, 91.66% {
+    opacity: 1;
+  }
+}
+
+@keyframes image3 {
+  0%, 25%, 66.66%, 91.66%, 100% {
+    opacity: 0;
+  }
+  33.33%, 58.33% {
+    opacity: 1;
+  }
+}
+
+@keyframes gradient-spin {
+  0% {
+    transform: translateX(-50%) translateY(-50%) rotate(0deg);
+  }
+  100% {
+    transform: translateX(-50%) translateY(-50%) rotate(360deg);
+  }
+}
+
+@keyframes show-text {
+  0%, 14.28% {
+    opacity: 0;
+  }
+  17%, 26% {
+    opacity: 1;
+  }
+  28.58%, 100% {
+    opacity: 0;
+  }
 }

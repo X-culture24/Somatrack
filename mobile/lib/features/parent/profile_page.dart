@@ -4,6 +4,14 @@ import 'package:provider/provider.dart';
 
 import '../../../core/providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets.dart';
+import 'wards_page.dart';
+
+void _comingSoon(BuildContext context) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Coming soon.')),
+  );
+}
 
 class ParentProfilePage extends StatelessWidget {
   const ParentProfilePage({super.key});
@@ -65,13 +73,14 @@ class ParentProfilePage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          _tile(Icons.person_outline, 'Personal Details', () {}),
-          _tile(Icons.family_restroom_outlined, 'Manage Children', () {}),
-          _tile(Icons.contact_emergency_outlined, 'Emergency Contacts', () {}),
-          _tile(Icons.payment_outlined, 'Payment Methods', () {}),
-          _tile(Icons.notifications_active_outlined, 'Notification Settings', () {}),
-          _tile(Icons.security_outlined, 'Change Password', () {}),
-          _tile(Icons.help_outline, 'Help & Support', () {}),
+          _tile(Icons.person_outline, 'Personal Details', () => _comingSoon(context)),
+          _tile(Icons.family_restroom_outlined, 'Manage Children',
+              () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WardsPage()))),
+          _tile(Icons.contact_emergency_outlined, 'Emergency Contacts', () => _comingSoon(context)),
+          _tile(Icons.payment_outlined, 'Payment Methods', () => _comingSoon(context)),
+          _tile(Icons.notifications_active_outlined, 'Notification Settings', () => _comingSoon(context)),
+          _tile(Icons.security_outlined, 'Change Password', () => showChangePasswordDialog(context)),
+          _tile(Icons.help_outline, 'Help & Support', () => _comingSoon(context)),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Divider(),

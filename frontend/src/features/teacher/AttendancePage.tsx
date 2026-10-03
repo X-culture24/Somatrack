@@ -4,8 +4,6 @@ import { academicsApi } from "../../api/academics";
 import { studentsApi } from "../../api/students";
 import { Button, Card, Field, PageHeader, Select, Table, useConfirm } from "../../components/ui";
 
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-
 export function AttendancePage() {
   const qc = useQueryClient();
   const { confirm, dialog } = useConfirm();

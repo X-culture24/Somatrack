@@ -5,89 +5,116 @@ import { Button, Card, Field, Input, PageHeader, Select, Stat, Table, kes, useCo
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
+const DISBURSE_LABEL: Record<string, string> = {
+  pending: "Disburse",
+  failed: "Retry disburse",
+  initiated: "In progress…",
+  success: "Paid",
+};
+
 export function PayrollPage() {
   const qc = useQueryClient();
   const { confirm, dialog } = useConfirm();
-  const [selectedRun, setSelectedRun] = useState<number | null>(null);
+  const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [newRun, setNewRun] = useState({ month: String(new Date().getMonth() + 1), year: String(new Date().getFullYear()) });
+  const [disbursingAll, setDisbursingAll] = useState(false);
 
-  const { data: runs } = useQuery({ queryKey: ["payroll-runs"], queryFn: () => payrollApi.runs() });
-  const { data: entries } = useQuery({
+  const { data: runs } = useQuery({ queryKey: ["payroll-runs"], queryFn: payrollApi.runs });
+  const { data: entries, refetch: refetchEntries } = useQuery({
     queryKey: ["payroll-entries", selectedRun],
     enabled: Boolean(selectedRun),
-    queryFn: () => payrollApi.entries({ payroll: String(selectedRun) }),
+    queryFn: () => payrollApi.entries(selectedRun!),
   });
 
   const create = useMutation({
-    mutationFn: () => payrollApi.createRun(newRun),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["payroll-runs"] }),
-  });
-  const generate = useMutation({
-    mutationFn: (id: number) => payrollApi.generate(id),
-    onSuccess: () => {
+    mutationFn: () => payrollApi.createRun({ month: Number(newRun.month), year: Number(newRun.year) }),
+    onSuccess: ({ run }) => {
       qc.invalidateQueries({ queryKey: ["payroll-runs"] });
-      qc.invalidateQueries({ queryKey: ["payroll-entries", selectedRun] });
+      setSelectedRun(run.id);
+    },
+    onError: (err: any) => {
+      window.alert(err?.response?.data?.message ?? "Could not create this payroll run — one may already exist for that month/year.");
     },
   });
-  const approve = useMutation({
-    mutationFn: (id: number) => payrollApi.approve(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["payroll-runs"] }),
+
+  const disburse = useMutation({
+    mutationFn: (entryId: string) => payrollApi.disburse(entryId),
+    onSuccess: () => refetchEntries(),
+    onError: (err: any) => {
+      window.alert(err?.response?.data?.message ?? "Disbursement failed to initiate.");
+    },
   });
-  const markPaid = useMutation({
-    mutationFn: (id: number) => payrollApi.markPaid(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["payroll-runs"] });
-      qc.invalidateQueries({ queryKey: ["payroll-entries", selectedRun] });
+
+  const disburseEquity = useMutation({
+    mutationFn: (entryId: string) => payrollApi.disburseEquity(entryId),
+    onSuccess: () => refetchEntries(),
+    onError: (err: any) => {
+      window.alert(err?.response?.data?.message ?? "Equity EFT disbursement failed to initiate.");
     },
   });
 
   async function handleCreate() {
     const ok = await confirm({
-      title: "Create payroll run",
-      message: `Create payroll for ${MONTHS[Number(newRun.month) - 1]} ${newRun.year}?`,
-      confirmLabel: "Create",
+      title: "Run payroll",
+      message: `Compute gross/net pay for every active staff member for ${MONTHS[Number(newRun.month) - 1]} ${newRun.year}?`,
+      confirmLabel: "Run payroll",
     });
     if (ok) create.mutate();
   }
 
-  const currentRun = (runs as any[] ?? []).find((r: any) => r.id === selectedRun);
+  async function handleDisburseOne(entryId: string, name: string) {
+    const ok = await confirm({
+      title: "Disburse salary",
+      message: `Send this net pay to ${name} via M-Pesa now? This cannot be undone.`,
+      confirmLabel: "Disburse",
+    });
+    if (ok) disburse.mutate(entryId);
+  }
 
-  async function handleGenerate() {
-    if (!currentRun) return;
+  async function handleDisburseOneEquity(entryId: string, name: string) {
     const ok = await confirm({
-      title: "Generate payslips",
-      message: `Build payslips for every active staff member for ${MONTHS[currentRun.month - 1]} ${currentRun.year}? This replaces any existing entries on this run.`,
-      confirmLabel: "Generate",
+      title: "Equity EFT disbursement",
+      message: `Send this net pay to ${name} via Equity Bank EFT to their registered bank account? This cannot be undone.`,
+      confirmLabel: "Disburse via Equity",
     });
-    if (ok) generate.mutate(currentRun.id);
+    if (ok) disburseEquity.mutate(entryId);
   }
-  async function handleApprove() {
-    if (!currentRun) return;
+
+  async function handleDisburseAll() {
+    const pending = ((entries as any[]) ?? []).filter((e) => e.disbursement_status === "pending" || e.disbursement_status === "failed");
+    if (pending.length === 0) return;
     const ok = await confirm({
-      title: "Approve payroll",
-      message: `Approve the ${MONTHS[currentRun.month - 1]} ${currentRun.year} payroll? PAYE must be filled in per payslip before approving.`,
-      confirmLabel: "Approve",
+      title: "Disburse to everyone",
+      message: `Send net pay to all ${pending.length} staff member(s) awaiting payment via M-Pesa? This triggers a real payout for each and cannot be undone.`,
+      confirmLabel: `Disburse to ${pending.length}`,
     });
-    if (ok) approve.mutate(currentRun.id);
+    if (!ok) return;
+    setDisbursingAll(true);
+    for (const e of pending) {
+      try {
+        await payrollApi.disburse(e.id);
+      } catch {
+        // one failure shouldn't stop the rest — each entry's own status reflects the outcome
+      }
+    }
+    setDisbursingAll(false);
+    refetchEntries();
   }
-  async function handleMarkPaid() {
-    if (!currentRun) return;
-    const ok = await confirm({
-      title: "Mark payroll as paid",
-      message: `Mark the ${MONTHS[currentRun.month - 1]} ${currentRun.year} payroll as paid? This confirms bank/M-Pesa disbursement has gone out.`,
-      confirmLabel: "Mark paid",
-    });
-    if (ok) markPaid.mutate(currentRun.id);
-  }
+
+  const currentRun = (runs as any[] ?? []).find((r: any) => r.id === selectedRun);
+  const pendingCount = ((entries as any[]) ?? []).filter((e) => e.disbursement_status === "pending" || e.disbursement_status === "failed").length;
 
   return (
     <div className="space-y-5">
       {dialog}
-      <PageHeader title="Payroll" subtitle="Monthly staff payroll — gross, statutory deductions, and net pay." />
+      <PageHeader title="Payroll" subtitle="Monthly staff payroll — gross, statutory deductions, and net pay disbursement via M-Pesa or Equity Bank EFT." />
 
       {/* Create new run */}
       <Card>
-        <h3 className="mb-3 font-semibold text-[#1b365d]">New payroll run</h3>
+        <h3 className="mb-3 font-semibold text-[#1b365d]">Run payroll for a month</h3>
+        <p className="mb-3 text-xs text-slate-500">
+          This immediately computes gross/net pay for every active staff member — there's no separate "generate" step.
+        </p>
         <div className="flex flex-wrap gap-3 items-end">
           <Field label="Month">
             <Select value={newRun.month} onChange={(e) => setNewRun({ ...newRun, month: e.target.value })} className="w-32">
@@ -97,27 +124,22 @@ export function PayrollPage() {
           <Field label="Year">
             <Input type="number" value={newRun.year} onChange={(e) => setNewRun({ ...newRun, year: e.target.value })} className="w-24" />
           </Field>
-          <Button onClick={handleCreate} disabled={create.isPending}>Create run</Button>
+          <Button onClick={handleCreate} disabled={create.isPending}>{create.isPending ? "Running…" : "Run payroll"}</Button>
         </div>
       </Card>
 
       {/* Runs table */}
-      <Table headers={["Period", "Status", "Gross", "PAYE", "NSSF+NHIF", "Net", ""]}>
+      <Table headers={["Period", "Staff", "Total net pay", ""]}>
+        {(runs as any[] ?? []).length === 0 && (
+          <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-400">No payroll runs yet.</td></tr>
+        )}
         {(runs as any[] ?? []).map((r: any) => (
           <tr key={r.id} className={`hover:bg-slate-50 cursor-pointer ${selectedRun === r.id ? "bg-[#4a9eca]/5" : ""}`}
             onClick={() => setSelectedRun(r.id === selectedRun ? null : r.id)}>
             <td className="px-4 py-3 font-medium">{MONTHS[r.month - 1]} {r.year}</td>
-            <td className="px-4 py-3">
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                r.status === "paid" ? "bg-green-100 text-green-700" :
-                r.status === "approved" ? "bg-blue-100 text-blue-700" :
-                "bg-slate-100 text-slate-600"}`}>{r.status}</span>
-            </td>
-            <td className="px-4 py-3">{kes(r.total_gross)}</td>
-            <td className="px-4 py-3">{kes(r.total_paye)}</td>
-            <td className="px-4 py-3">{kes(Number(r.total_nssf) + Number(r.total_nhif))}</td>
-            <td className="px-4 py-3 font-semibold text-[#1b365d]">{kes(r.total_net)}</td>
-            <td className="px-4 py-3 text-xs text-[#4a9eca]">{selectedRun === r.id ? "▲ hide" : "▼ entries"}</td>
+            <td className="px-4 py-3">{r.staff_count}</td>
+            <td className="px-4 py-3 font-semibold text-[#1b365d]">{kes(r.total_net_pay)}</td>
+            <td className="px-4 py-3 text-xs text-[#4a9eca]">{selectedRun === r.id ? "▲ hide" : "▼ payslips"}</td>
           </tr>
         ))}
       </Table>
@@ -129,42 +151,62 @@ export function PayrollPage() {
             <h3 className="font-semibold text-[#1b365d]">
               Payslips — {currentRun ? `${MONTHS[currentRun.month - 1]} ${currentRun.year}` : ""}
             </h3>
-            <div className="flex gap-2">
-              {currentRun?.status === "draft" && (
-                <Button variant="ghost" onClick={handleGenerate} disabled={generate.isPending}>
-                  {(entries as any[]).length > 0 ? "Regenerate payslips" : "Generate payslips"}
-                </Button>
-              )}
-              {(currentRun?.status === "draft" || currentRun?.status === "reviewed") && (entries as any[]).length > 0 && (
-                <Button onClick={handleApprove} disabled={approve.isPending}>Approve payroll</Button>
-              )}
-              {currentRun?.status === "approved" && (
-                <Button onClick={handleMarkPaid} disabled={markPaid.isPending}>Mark as paid</Button>
-              )}
-            </div>
+            {pendingCount > 0 && (
+              <Button onClick={handleDisburseAll} disabled={disbursingAll}>
+                {disbursingAll ? "Disbursing…" : `Disburse to all (${pendingCount})`}
+              </Button>
+            )}
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 mb-4">
             <Stat label="Staff on payroll" value={(entries as any[]).length} />
             <Stat label="Total gross" value={kes((entries as any[]).reduce((s, e) => s + Number(e.gross_pay), 0))} />
-            <Stat label="Total deductions" value={kes((entries as any[]).reduce((s, e) => s + Number(e.total_deductions), 0))} />
+            <Stat label="Total deductions" value={kes((entries as any[]).reduce((s, e) => s + Number(e.deductions), 0))} />
             <Stat label="Total net" value={kes((entries as any[]).reduce((s, e) => s + Number(e.net_pay), 0))} />
           </div>
-          <Table headers={["Staff no.", "Name", "Basic", "Gross", "PAYE", "NSSF", "NHIF", "Other deductions", "Net", "Paid"]}>
-            {(entries as any[]).map((e: any) => (
-              <tr key={e.id} className="hover:bg-slate-50">
-                <td className="px-3 py-2 text-xs">{e.staff_no}</td>
-                <td className="px-3 py-2 font-medium">{e.staff_name}</td>
-                <td className="px-3 py-2">{kes(e.basic_salary)}</td>
-                <td className="px-3 py-2 font-medium">{kes(e.gross_pay)}</td>
-                <td className="px-3 py-2 text-red-600">{kes(e.paye)}</td>
-                <td className="px-3 py-2 text-red-600">{kes(e.nssf)}</td>
-                <td className="px-3 py-2 text-red-600">{kes(e.nhif)}</td>
-                <td className="px-3 py-2 text-red-600">{kes(Number(e.sacco)+Number(e.helb)+Number(e.other_deductions))}</td>
-                <td className="px-3 py-2 font-bold text-[#1b365d]">{kes(e.net_pay)}</td>
-                <td className="px-3 py-2">{e.paid ? "✅" : "⏳"}</td>
-              </tr>
-            ))}
-          </Table>
+          {(entries as any[]).length === 0 ? (
+            <p className="rounded-2xl border border-slate-200 bg-white py-8 text-center text-sm text-slate-400">
+              No active staff members yet — add one on the Staff page first.
+            </p>
+          ) : (
+            <Table headers={["Employee no.", "Name", "Basic", "Gross", "PAYE", "NSSF", "NHIF", "Deductions", "Net", "Disbursement", ""]}>
+              {(entries as any[]).map((e: any) => (
+                <tr key={e.id} className="hover:bg-slate-50">
+                  <td className="px-3 py-2 text-xs">{e.employee_no}</td>
+                  <td className="px-3 py-2 font-medium">{e.staff_name}</td>
+                  <td className="px-3 py-2">{kes(e.basic_salary)}</td>
+                  <td className="px-3 py-2 font-medium">{kes(e.gross_pay)}</td>
+                  <td className="px-3 py-2 text-red-600">{kes(e.paye)}</td>
+                  <td className="px-3 py-2 text-red-600">{kes(e.nssf)}</td>
+                  <td className="px-3 py-2 text-red-600">{kes(e.nhif)}</td>
+                  <td className="px-3 py-2 text-red-600">{kes(e.deductions)}</td>
+                  <td className="px-3 py-2 font-bold text-[#1b365d]">{kes(e.net_pay)}</td>
+                  <td className="px-3 py-2">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      e.disbursement_status === "success" ? "bg-green-100 text-green-700" :
+                      e.disbursement_status === "failed" ? "bg-red-100 text-red-700" :
+                      e.disbursement_status === "initiated" ? "bg-blue-100 text-blue-700" :
+                      "bg-slate-100 text-slate-600"}`}>
+                      {e.disbursement_status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    {(e.disbursement_status === "pending" || e.disbursement_status === "failed") && (
+                      <div className="flex flex-col gap-1">
+                        <Button variant="ghost" onClick={() => handleDisburseOne(e.id, e.staff_name)} disabled={disburse.isPending || disburseEquity.isPending} title="Pay via M-Pesa B2C">
+                          {DISBURSE_LABEL[e.disbursement_status]} (M-Pesa)
+                        </Button>
+                        {e.bank_account_no && (
+                          <Button variant="ghost" onClick={() => handleDisburseOneEquity(e.id, e.staff_name)} disabled={disburse.isPending || disburseEquity.isPending} title="Pay via Equity Bank EFT">
+                            {DISBURSE_LABEL[e.disbursement_status]} (Equity EFT)
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </Table>
+          )}
         </div>
       )}
     </div>

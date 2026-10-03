@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import { novaApi } from "../../api/nova";
 import { Button, Card, cn, useConfirm } from "../../components/ui";
 import { useTimer } from "./useTimer";

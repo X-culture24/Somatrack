@@ -13,13 +13,18 @@ import (
 )
 
 type Service struct {
-	fee         *FeeStore
-	payroll     *PayrollStore
-	disbursement *DisbursementStore
+	fee              *FeeStore
+	payroll          *PayrollStore
+	disbursement     *DisbursementStore
+	equityDisburse   *EquityDisbursementStore
 }
 
 func NewService(fee *FeeStore, payroll *PayrollStore, disbursement *DisbursementStore) *Service {
 	return &Service{fee: fee, payroll: payroll, disbursement: disbursement}
+}
+
+func (svc *Service) EnableEquityDisbursement(eq *EquityDisbursementStore) {
+	svc.equityDisburse = eq
 }
 
 // RegisterPublicRoutes exposes Safaricom's B2C result/timeout callback webhooks.
@@ -35,12 +40,27 @@ func (svc *Service) RegisterInternalRoutes(r chi.Router) {
 	r.Get("/invoices/{id}", svc.handleGetInvoice)
 	r.Get("/payments", svc.handleListPayments)
 	r.Get("/fee-structures", svc.handleListFeeStructures)
+	r.Post("/fee-structures", svc.handleCreateFeeStructure)
+	r.Get("/fee-structures/{id}", svc.handleGetFeeStructure)
+	r.Put("/fee-structures/{id}", svc.handleUpdateFeeStructure)
+	r.Delete("/fee-structures/{id}", svc.handleDeleteFeeStructure)
+
 	r.Get("/discounts", svc.handleListDiscounts)
+	r.Post("/discounts", svc.handleCreateDiscount)
+
+	r.Post("/billing/generate", svc.handleGenerateBilling)
+	r.Post("/students/{id}/bill", svc.handleBillStudent)
+
+	r.Get("/adhoc-fees", svc.handleListAdhocFees)
+	r.Post("/adhoc-fees", svc.handleCreateAdhocFee)
+	r.Delete("/adhoc-fees/{id}", svc.handleDeleteAdhocFee)
+	r.Post("/invoices/{id}/charges", svc.handleAddInvoiceCharge)
 
 	r.Post("/payroll/runs", svc.handleGeneratePayrollRun)
 	r.Get("/payroll/runs", svc.handleListPayrollRuns)
 	r.Get("/payroll/runs/{id}/entries", svc.handleListPayrollEntries)
 	r.Post("/payroll/entries/{id}/disburse", svc.handleDisburseEntry)
+	r.Post("/payroll/entries/{id}/disburse/equity", svc.handleDisburseEntryEquity)
 }
 
 func (svc *Service) handleListInvoices(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +154,187 @@ func (svc *Service) handleListFeeStructures(w http.ResponseWriter, r *http.Reque
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{"data": rows})
 }
 
+func (svc *Service) handleCreateFeeStructure(w http.ResponseWriter, r *http.Request) {
+	var body FeeStructureInput
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	row, err := svc.fee.CreateFeeStructure(r.Context(), body)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, row)
+}
+
+func (svc *Service) handleGetFeeStructure(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid fee structure id")
+		return
+	}
+	row, err := svc.fee.GetFeeStructure(r.Context(), id)
+	if err != nil {
+		httpx.ErrNotFound(w, "fee structure not found")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, row)
+}
+
+func (svc *Service) handleUpdateFeeStructure(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid fee structure id")
+		return
+	}
+	var body FeeStructureInput
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	row, err := svc.fee.UpdateFeeStructure(r.Context(), id, body)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, row)
+}
+
+func (svc *Service) handleDeleteFeeStructure(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid fee structure id")
+		return
+	}
+	if err := svc.fee.DeleteFeeStructure(r.Context(), id); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": id.String()})
+}
+
+func (svc *Service) handleCreateDiscount(w http.ResponseWriter, r *http.Request) {
+	var body DiscountInput
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	row, err := svc.fee.CreateDiscount(r.Context(), body)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, row)
+}
+
+func (svc *Service) handleGenerateBilling(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TermID string `json:"term_id" validate:"required,uuid"`
+	}
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	termID, err := uuid.Parse(body.TermID)
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid term_id")
+		return
+	}
+	result, err := svc.fee.GenerateInvoicesForTerm(r.Context(), termID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (svc *Service) handleBillStudent(w http.ResponseWriter, r *http.Request) {
+	studentID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid student id")
+		return
+	}
+	invoiceID, err := svc.fee.BillStudentForCurrentTerm(r.Context(), studentID)
+	if err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{"invoice_id": invoiceID})
+}
+
+func (svc *Service) handleListAdhocFees(w http.ResponseWriter, r *http.Request) {
+	var termID *uuid.UUID
+	if s := r.URL.Query().Get("term_id"); s != "" {
+		id, err := uuid.Parse(s)
+		if err != nil {
+			httpx.ErrBadRequest(w, "invalid term_id")
+			return
+		}
+		termID = &id
+	}
+	rows, err := svc.fee.ListAdhocFees(r.Context(), termID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{"data": rows})
+}
+
+func (svc *Service) handleCreateAdhocFee(w http.ResponseWriter, r *http.Request) {
+	var body AdhocFeeInput
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	row, err := svc.fee.CreateAdhocFee(r.Context(), body)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, row)
+}
+
+func (svc *Service) handleDeleteAdhocFee(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid adhoc fee id")
+		return
+	}
+	if err := svc.fee.DeleteAdhocFee(r.Context(), id); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": id.String()})
+}
+
+func (svc *Service) handleAddInvoiceCharge(w http.ResponseWriter, r *http.Request) {
+	invoiceID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid invoice id")
+		return
+	}
+	var body struct {
+		AdhocFeeID  *uuid.UUID `json:"adhoc_fee_id,omitempty"`
+		Description string     `json:"description"`
+		Amount      float64    `json:"amount"`
+	}
+	if err := httpx.BindAndValidate(r, &body); err != nil {
+		httpx.ErrBadRequest(w, err.Error())
+		return
+	}
+	if err := svc.fee.AddInvoiceCharge(r.Context(), invoiceID, body.AdhocFeeID, body.Description, body.Amount); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+	inv, err := svc.fee.GetInvoice(r.Context(), invoiceID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, inv)
+}
+
 func (svc *Service) handleListDiscounts(w http.ResponseWriter, r *http.Request) {
 	var sid *uuid.UUID
 	if s := r.URL.Query().Get("student_id"); s != "" {
@@ -221,6 +422,36 @@ func (svc *Service) handleDisburseEntry(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusAccepted, tx)
+}
+
+func (svc *Service) handleDisburseEntryEquity(w http.ResponseWriter, r *http.Request) {
+	if svc.equityDisburse == nil {
+		httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "equity_not_configured",
+			"message": "Equity EFT disbursement is not enabled — check JENGA_* environment variables.",
+		})
+		return
+	}
+	entryID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.ErrBadRequest(w, "invalid entry id")
+		return
+	}
+	tx, err := svc.equityDisburse.InitiateEFT(r.Context(), entryID)
+	if err != nil {
+		switch err {
+		case ErrAlreadyDisbursed, ErrEntryNotFound:
+			httpx.ErrConflict(w, err.Error())
+		case ErrNoBankAccount:
+			httpx.ErrBadRequest(w, err.Error())
+		default:
+			httpx.JSON(w, http.StatusBadGateway, map[string]interface{}{
+				"error": "equity_eft_error", "message": err.Error(), "transaction": tx,
+			})
+		}
 		return
 	}
 	httpx.JSON(w, http.StatusAccepted, tx)

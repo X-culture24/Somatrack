@@ -1,0 +1,14 @@
+DROP TRIGGER IF EXISTS trg_supplier_invoice_status ON supplier_invoices;
+DROP FUNCTION IF EXISTS set_supplier_invoice_status();
+ALTER TABLE supplier_invoices DROP CONSTRAINT IF EXISTS supplier_invoice_not_overpaid;
+DROP TRIGGER IF EXISTS trg_pocket_money ON pocket_money_transactions;
+DROP FUNCTION IF EXISTS check_pocket_money();
+DROP VIEW IF EXISTS pocket_money_balances;
+DROP TRIGGER IF EXISTS trg_bed_allocation ON bed_allocations;
+DROP FUNCTION IF EXISTS apply_bed_allocation();
+DROP TRIGGER IF EXISTS trg_sale ON sales;
+DROP FUNCTION IF EXISTS apply_sale();
+DROP TRIGGER IF EXISTS trg_inventory_txn ON inventory_transactions;
+DROP FUNCTION IF EXISTS apply_inventory_txn();
+DROP FUNCTION IF EXISTS inventory_txn_delta(TEXT, INTEGER);
+ALTER TABLE inventory_transactions DROP CONSTRAINT IF EXISTS inventory_txn_quantity_sign;

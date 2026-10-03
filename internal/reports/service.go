@@ -62,10 +62,10 @@ func (s *Service) handleAttendanceReport(w http.ResponseWriter, r *http.Request)
 		       COUNT(DISTINCT dates.d) AS expected_days
 		FROM generate_series($1::date, $2::date, interval '1 day') AS dates(d)
 		CROSS JOIN students s
-		LEFT JOIN classes c ON c.id = s.class_id
-		LEFT JOIN attendance a ON a.student_id = s.id AND a.date = dates.d
+		LEFT JOIN class_groups c ON c.id = s.current_class_id
+		LEFT JOIN attendance_records a ON a.student_id = s.id AND a.date = dates.d AND a.subject_id IS NULL
 		WHERE EXTRACT(ISODOW FROM dates.d) BETWEEN 1 AND 5
-		  AND ($3::uuid IS NULL OR s.class_id = $3)
+		  AND ($3::uuid IS NULL OR s.current_class_id = $3)
 		  AND ($4::uuid IS NULL OR s.stream_id = $4)
 		  AND ($5::uuid IS NULL OR s.id = $5)
 		  AND s.is_active = TRUE
@@ -119,23 +119,33 @@ func (s *Service) handleGradesReport(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrBadRequest(w, err.Error())
 		return
 	}
+	// total_students is COUNT(*) OVER (...) rather than COUNT(DISTINCT ...)
+	// OVER (...) — Postgres doesn't support DISTINCT inside a window
+	// function, and it isn't needed here anyway since the CTE's GROUP BY
+	// already yields at most one row per (student, subject) pair.
 	q := `
-		SELECT s.id AS student_id,
-		       s.first_name || ' ' || s.last_name AS student_name,
-		       c.id AS class_id, COALESCE(c.name,'') AS class_name,
-		       subj.id AS subject_id, COALESCE(subj.name,'') AS subject_name,
-		       COALESCE(AVG(m.score), 0) AS mean_score,
-		       COUNT(DISTINCT s.id) OVER (PARTITION BY subj.id) AS total_students
-		FROM marks m
-		JOIN assessments a ON a.id = m.assessment_id
-		JOIN students s ON s.id = m.student_id
-		LEFT JOIN classes c ON c.id = s.class_id
-		LEFT JOIN subjects subj ON subj.id = a.subject_id
-		WHERE a.term_id = $1
-		  AND ($2::uuid IS NULL OR s.class_id = $2)
-		  AND ($3::uuid IS NULL OR a.subject_id = $3)
-		  AND ($4::uuid IS NULL OR s.id = $4)
-		GROUP BY s.id, s.first_name, s.last_name, c.id, c.name, subj.id, subj.name`
+		WITH agg AS (
+			SELECT s.id AS student_id,
+			       s.first_name || ' ' || s.last_name AS student_name,
+			       c.id AS class_id, COALESCE(c.name,'') AS class_name,
+			       subj.id AS subject_id, COALESCE(subj.name,'') AS subject_name,
+			       COALESCE(AVG(m.score / NULLIF(a.total_marks, 0) * 100), 0) AS mean_score
+			FROM marks m
+			JOIN assessments a ON a.id = m.assessment_id
+			JOIN students s ON s.id = m.student_id
+			-- The class the exam was set for, not the student's current
+			-- class: a promoted student's old results keep their old class.
+			LEFT JOIN class_groups c ON c.id = a.class_id
+			LEFT JOIN subjects subj ON subj.id = a.subject_id
+			WHERE a.term_id = $1
+			  AND ($2::uuid IS NULL OR a.class_id = $2)
+			  AND ($3::uuid IS NULL OR a.subject_id = $3)
+			  AND ($4::uuid IS NULL OR s.id = $4)
+			GROUP BY s.id, s.first_name, s.last_name, c.id, c.name, subj.id, subj.name
+		)
+		SELECT student_id, student_name, class_id, class_name, subject_id, subject_name, mean_score,
+		       COUNT(*) OVER (PARTITION BY subject_id) AS total_students
+		FROM agg`
 	rows, err := s.pool.Query(r.Context(), q, body.TermID, body.ClassID, body.SubjectID, body.StudentID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
@@ -218,11 +228,11 @@ func (s *Service) handleFeeCollectionReport(w http.ResponseWriter, r *http.Reque
 	q := `
 		SELECT c.id AS class_id, COALESCE(c.name,'') AS class_name,
 		       COUNT(DISTINCT s.id) AS total_students,
-		       COALESCE(SUM(i.total_due),0) AS expected_amount,
+		       COALESCE(SUM(i.total_amount),0) AS expected_amount,
 		       COALESCE(SUM(i.total_paid),0) AS collected_amount,
 		       COALESCE(SUM(CASE WHEN i.balance > 0 THEN i.balance ELSE 0 END),0) AS outstanding
 		FROM students s
-		LEFT JOIN classes c ON c.id = s.class_id
+		LEFT JOIN class_groups c ON c.id = s.current_class_id
 		LEFT JOIN invoices i ON i.student_id = s.id
 		  AND ($1::uuid IS NULL OR i.term_id = $1)
 		WHERE s.is_active = TRUE
@@ -275,14 +285,14 @@ func (s *Service) handleClassPerformance(w http.ResponseWriter, r *http.Request)
 	}
 	q := `
 		SELECT subj.id AS subject_id, COALESCE(subj.name,'') AS subject_name,
-		       COALESCE(AVG(m.score), 0) AS mean_score,
-		       COUNT(DISTINCT CASE WHEN m.score >= 50 THEN s.id END) AS pass_count,
+		       COALESCE(AVG(m.score / NULLIF(a.total_marks, 0) * 100), 0) AS mean_score,
+		       COUNT(DISTINCT CASE WHEN m.score / NULLIF(a.total_marks, 0) * 100 >= 50 THEN s.id END) AS pass_count,
 		       COUNT(DISTINCT s.id) AS total_students
 		FROM marks m
 		JOIN assessments a ON a.id = m.assessment_id
 		JOIN students s ON s.id = m.student_id
 		JOIN subjects subj ON subj.id = a.subject_id
-		WHERE a.term_id = $1 AND s.class_id = $2
+		WHERE a.term_id = $1 AND a.class_id = $2
 		GROUP BY subj.id, subj.name`
 	rows, err := s.pool.Query(r.Context(), q, body.TermID, body.ClassID)
 	if err != nil {

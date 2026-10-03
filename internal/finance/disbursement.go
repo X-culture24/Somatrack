@@ -76,12 +76,18 @@ func (d *DisbursementStore) InitiateSalaryPayment(ctx context.Context, entryID u
 	if res != nil {
 		convID = res.ConversationID
 	}
+	// Explicit ::type casts on every parameter — without them pgx's extended
+	// query protocol fails to infer $1's type here ("inconsistent types
+	// deduced for parameter $1", SQLSTATE 42P08) even though the same SQL
+	// works fine via an explicitly-typed PREPARE. Verified this INSERT
+	// 500'd on every disbursement attempt until these casts were added.
 	err = d.pool.QueryRow(ctx, `
 		INSERT INTO b2c_transactions
 			(payroll_entry_id, staff_id, phone_number, amount, remarks, occasion, command_id,
 			 status, originator_conversation_id, conversation_id, response_code, response_description,
 			 raw_initiate_response)
-		VALUES ($1, $2, $3, $4, $5, $6, 'SalaryPayment', $7, $8, $9, $10, $11, $12)
+		VALUES ($1::uuid, $2::uuid, $3::varchar, $4::numeric, $5::varchar, $6::varchar, 'SalaryPayment',
+			$7::varchar, $8::varchar, $9::varchar, $10::varchar, $11::varchar, $12::jsonb)
 		RETURNING id`,
 		entryID, entry.StaffID, entry.Phone, entry.NetPay, remarks, "Payroll",
 		status, originatorID, convID, respCode, respDesc, rawJSON,

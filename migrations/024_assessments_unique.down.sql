@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_assessments_class_subject_term_type;

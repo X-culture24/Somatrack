@@ -111,7 +111,7 @@ func (p *FingerprintProxy) handleDeviceRegister(w http.ResponseWriter, r *http.R
 	}
 	res, err := p.client.RegisterDevice(r.Context(), &body)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, res)
@@ -131,7 +131,7 @@ func (p *FingerprintProxy) handleScan(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := p.client.ProcessScan(r.Context(), &scan)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
@@ -146,7 +146,7 @@ func (p *FingerprintProxy) handleGetTemplate(w http.ResponseWriter, r *http.Requ
 	}
 	res, err := p.client.GetTemplate(r.Context(), sid)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
@@ -175,7 +175,7 @@ func (p *FingerprintProxy) handleStoreTemplate(w http.ResponseWriter, r *http.Re
 		DeviceID:    body.DeviceID,
 	}
 	if err := p.client.StoreTemplate(r.Context(), req); err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -189,7 +189,7 @@ func (p *FingerprintProxy) handleDeleteTemplate(w http.ResponseWriter, r *http.R
 		return
 	}
 	if err := p.client.DeleteTemplate(r.Context(), sid); err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -213,7 +213,7 @@ func (p *FingerprintProxy) handleAttendance(w http.ResponseWriter, r *http.Reque
 	}
 	res, err := p.client.ListAttendance(r.Context(), q)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
@@ -251,7 +251,7 @@ func (p *FingerprintProxy) handleDailySummary(w http.ResponseWriter, r *http.Req
 	}
 	res, err := p.client.DailyAttendanceSummary(r.Context(), req)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
@@ -273,7 +273,7 @@ func (p *FingerprintProxy) handleClassRosterAttendance(w http.ResponseWriter, r 
 		Date:    date,
 	})
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{
@@ -336,7 +336,7 @@ func (p *FingerprintProxy) handleStudentAttendanceRange(w http.ResponseWriter, r
 		EndDate:   endDate,
 	})
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
@@ -365,7 +365,7 @@ func (p *FingerprintProxy) handleStoreStaffTemplate(w http.ResponseWriter, r *ht
 		DeviceID:    body.DeviceID,
 	}
 	if err := p.client.StoreStaffTemplate(r.Context(), req); err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -380,7 +380,7 @@ func (p *FingerprintProxy) handleGetStaffTemplate(w http.ResponseWriter, r *http
 	}
 	res, err := p.client.GetStaffTemplate(r.Context(), sid)
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
@@ -394,7 +394,7 @@ func (p *FingerprintProxy) handleDeleteStaffTemplate(w http.ResponseWriter, r *h
 		return
 	}
 	if err := p.client.DeleteStaffTemplate(r.Context(), sid); err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -444,7 +444,7 @@ func (p *FingerprintProxy) handleStaffAttendanceRange(w http.ResponseWriter, r *
 		EndDate:   endDate,
 	})
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
@@ -470,7 +470,7 @@ func (p *FingerprintProxy) handleMyStaffAttendanceRange(w http.ResponseWriter, r
 		EndDate:   endDate,
 	})
 	if err != nil {
-		writeUpstreamError(w, err)
+		WriteUpstreamError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)

@@ -12,6 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// ErrInvalidTemplate wraps client-input errors (bad base64, empty payload) so
+// handlers can return 400 instead of 500 for these — distinct from genuine
+// server-side failures (DB errors, encryption failures).
+var ErrInvalidTemplate = errors.New("invalid template")
+
 type FingerprintTemplate struct {
 	StudentID       uuid.UUID  `json:"student_id"`
 	TemplateData    []byte     `json:"-"`
@@ -34,10 +39,10 @@ func NewTemplateStore(pool *pgxpool.Pool, crypto *Crypto) *TemplateStore {
 func (s *TemplateStore) Store(ctx context.Context, studentID uuid.UUID, templateB64 string, enrolledBy, deviceID uuid.UUID) error {
 	raw, err := base64.StdEncoding.DecodeString(templateB64)
 	if err != nil {
-		return fmt.Errorf("decode base64 template: %w", err)
+		return fmt.Errorf("%w: decode base64 template: %v", ErrInvalidTemplate, err)
 	}
 	if len(raw) == 0 {
-		return errors.New("empty template")
+		return fmt.Errorf("%w: empty template", ErrInvalidTemplate)
 	}
 	encrypted, err := s.crypto.EncryptTemplate(raw)
 	if err != nil {
@@ -104,10 +109,10 @@ func (s *TemplateStore) Delete(ctx context.Context, studentID uuid.UUID) error {
 func (s *TemplateStore) StoreStaff(ctx context.Context, staffID uuid.UUID, templateB64 string, enrolledBy, deviceID uuid.UUID) error {
 	raw, err := base64.StdEncoding.DecodeString(templateB64)
 	if err != nil {
-		return fmt.Errorf("decode base64 template: %w", err)
+		return fmt.Errorf("%w: decode base64 template: %v", ErrInvalidTemplate, err)
 	}
 	if len(raw) == 0 {
-		return errors.New("empty template")
+		return fmt.Errorf("%w: empty template", ErrInvalidTemplate)
 	}
 	encrypted, err := s.crypto.EncryptTemplate(raw)
 	if err != nil {

@@ -102,6 +102,24 @@ class ApiClient {
     return _handleResponse(response, decode);
   }
 
+  /// For binary responses (PDF invoices/receipts) — the JSON-decoding get<T>
+  /// above can't be reused since there's no JSON body to parse.
+  Future<List<int>> getBytes(String path) async {
+    final uri = _uri(path);
+    final response = await _client
+        .get(uri, headers: _headers(json: false))
+        .timeout(ApiConstants.timeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      String message = 'Request failed: ${response.statusCode}';
+      try {
+        final body = jsonDecode(utf8.decode(response.bodyBytes));
+        if (body is Map && body.containsKey('message')) message = body['message'] ?? message;
+      } catch (_) {}
+      throw ApiException(response.statusCode, message);
+    }
+    return response.bodyBytes;
+  }
+
   Future<void> delete(String path) async {
     final uri = _uri(path);
     final response = await _client
@@ -111,6 +129,21 @@ class ApiClient {
       throw ApiException(response.statusCode, 'Delete failed');
     }
   }
+}
+
+/// Direct-to-DB gateway resources (students, classes, lesson-plans, announcements,
+/// teacher/my-classes...) wrap list responses as {"results": [...], "count": N};
+/// finance-svc-backed resources (invoices, payments) use {"data": [...]} instead.
+/// Same shape, different key — mirrors the web app's api/client.ts unwrap().
+/// Several screens here previously checked only 'data', so a real 'results'
+/// response (the more common shape) silently decoded to an empty list.
+List<dynamic> unwrapList(dynamic d) {
+  if (d is List) return d;
+  if (d is Map) {
+    if (d['results'] is List) return d['results'] as List;
+    if (d['data'] is List) return d['data'] as List;
+  }
+  return const [];
 }
 
 class ApiException implements Exception {

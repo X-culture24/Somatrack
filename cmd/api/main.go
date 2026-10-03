@@ -2,23 +2,29 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 
 	jwtutil "github.com/stmaryskabete/lms/internal/shared/jwt"
 
 	"github.com/stmaryskabete/lms/internal/api"
-	lmsmiddleware "github.com/stmaryskabete/lms/internal/middleware"
 	"github.com/stmaryskabete/lms/internal/config"
 	"github.com/stmaryskabete/lms/internal/db"
+	"github.com/stmaryskabete/lms/internal/jenga"
+	"github.com/stmaryskabete/lms/internal/signedlink"
+	lmsmiddleware "github.com/stmaryskabete/lms/internal/middleware"
 	"github.com/stmaryskabete/lms/internal/shared/httpx"
 	"github.com/stmaryskabete/lms/internal/shared/rpc"
 	"github.com/stmaryskabete/lms/internal/shared/types"
@@ -65,6 +71,47 @@ func main() {
 	dashboard := api.NewDashboardService(pool, paymentClient, reportClient)
 	fpProxy := api.NewFingerprintProxy(fpClient, pool)
 	financeProxy := api.NewFinanceProxy(financeClient, pool)
+	academicsSvc := api.NewAcademicsService(pool)
+	guardiansSvc := api.NewGuardiansService(pool)
+	studentsSvc := api.NewStudentsService(pool, financeClient)
+	admissionsSvc := api.NewAdmissionsService(pool, financeClient)
+	clubsSvc := api.NewClubsService(pool)
+	transportRoutesSvc := api.NewTransportRoutesService(pool)
+	uploadsSvc := api.NewUploadsService(cfg.MediaRoot, cfg.MediaURL)
+	usersSvc := api.NewUsersService(pool)
+	announcementsSvc := api.NewAnnouncementsService(pool)
+	librarySvc := api.NewLibraryService(pool)
+	staffSvc := api.NewStaffService(pool)
+	departmentsSvc := api.NewDepartmentsService(pool)
+	vehiclesSvc := api.NewVehiclesService(pool)
+	transfersSvc := api.NewStudentTransfersService(pool, financeClient)
+	feeAnalyticsSvc := api.NewFeeAnalyticsService(pool)
+	cbcSvc := api.NewCBCService(pool)
+	reportsSvc := api.NewReportsService(reportClient)
+	curriculumSvc := api.NewCurriculumService(pool)
+	lessonPlansSvc := api.NewLessonPlansService(pool)
+	teacherSvc := api.NewTeacherService(pool)
+	attendanceMarkSvc := api.NewAttendanceMarkService(pool)
+	payFeesSvc := api.NewPayFeesService(pool, paymentClient)
+
+	// Document signing is mandatory: receipts and result slips carry signed QR
+	// codes, and unsigned documents could be forged undetectably.
+	signingKeys, err := signedlink.KeyringFromEnv()
+	if err != nil {
+		if errors.Is(err, signedlink.ErrNoKey) {
+			log.Fatalf("document signing key: SIGNING_KEY_PATH is not set — generate one with `go run ./cmd/signing-keygen -out secrets/signing_ed25519.pem`")
+		}
+		log.Fatalf("document signing key: %v", err)
+	}
+	linksSvc := api.NewLinksService(pool, signingKeys, cfg.PortalURL)
+
+	// Declarative record-keeping forms (internal/api/resources.go).
+	resources := api.NewResourceRegistry(pool)
+	if err := resources.Verify(ctx); err != nil {
+		log.Fatalf("%v", err)
+	}
+	documentsSvc := api.NewDocumentsService(pool, linksSvc)
+	resultsSvc := api.NewResultsService(pool, linksSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -75,7 +122,56 @@ func main() {
 	r.Use(lmsmiddleware.CORS(cfg.CORSAllowedOrigins))
 	r.Use(lmsmiddleware.Security)
 
-	r.Get("/api/health/", api.HealthHandler(pool))
+	r.Get("/api/health/", api.HealthHandler(pool, map[string]string{
+		"fingerprint-svc":  fpURL,
+		"payment-svc":      paymentURL,
+		"notification-svc": notifURL,
+		"report-svc":       reportURL,
+		"finance-svc":      financeURL,
+	}))
+
+	// Public (unauthenticated — Safaricom carries no JWT) STK Push callback,
+	// relayed to payment-svc's internal endpoint. Lets ngrok's single free
+	// tunnel (pointed at this gateway for the mobile app) also carry the
+	// STK Push callback, instead of needing a second tunnel to payment-svc.
+	r.Post("/api/webhooks/payments/stk-callback", func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			httpx.ErrBadRequest(w, err.Error())
+			return
+		}
+		if err := paymentClient.ForwardSTKCallback(r.Context(), payload); err != nil {
+			log.Printf("[api-gateway] forward stk callback: %v", err)
+		}
+		httpx.JSON(w, http.StatusOK, map[string]string{"ResultCode": "0", "ResultDesc": "Accepted"})
+	})
+
+	// Public Equity Jenga IPN endpoint (Jenga HQ → "IPN callback URL"). Jenga
+	// sends Basic auth (or ?secret=), checked here before relaying the body
+	// to payment-svc over the internal channel, same as the STK callback.
+	jengaIPNAuth := jenga.IPNAuthFromEnv()
+	r.Post("/api/webhooks/payments/jenga-ipn", func(w http.ResponseWriter, r *http.Request) {
+		if !jengaIPNAuth.Check(r) {
+			log.Printf("[api-gateway] jenga ipn rejected from %s", r.RemoteAddr)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var payload json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			httpx.ErrBadRequest(w, err.Error())
+			return
+		}
+		// Unlike the STK callback, a failed relay returns 5xx so Jenga retries
+		// instead of the payment silently going missing.
+		if err := paymentClient.ForwardJengaIPN(r.Context(), payload); err != nil {
+			log.Printf("[api-gateway] forward jenga ipn: %v", err)
+			http.Error(w, "temporarily unavailable", http.StatusBadGateway)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, map[string]string{"status": "received"})
+	})
+
+	linksSvc.RegisterPublicRoutes(r)
 
 	r.Route("/api", func(r chi.Router) {
 		authSvc.RegisterRoutes(r)
@@ -87,43 +183,75 @@ func main() {
 			r.Get("/dashboard/", dashboard.Handle)
 
 			fpProxy.RegisterRoutes(r)
+			attendanceMarkSvc.RegisterRoutes(r)
+			payFeesSvc.RegisterRoutes(r)
 			financeProxy.RegisterRoutes(r)
+			documentsSvc.RegisterRoutes(r)
+			linksSvc.RegisterRoutes(r)
+			resources.Mount(r)
+			resultsSvc.RegisterRoutes(r)
+			studentsSvc.RegisterRoutes(r)
+			guardiansSvc.RegisterRoutes(r)
+			admissionsSvc.RegisterRoutes(r)
+			academicsSvc.RegisterRoutes(r)
+			academicsSvc.RegisterExamRoutes(r)
+			clubsSvc.RegisterRoutes(r)
+			transportRoutesSvc.RegisterRoutes(r)
+			vehiclesSvc.RegisterRoutes(r)
+			transfersSvc.RegisterRoutes(r)
+			feeAnalyticsSvc.RegisterRoutes(r)
+			cbcSvc.RegisterRoutes(r)
+			uploadsSvc.RegisterRoutes(r)
 
-			r.Route("/users/", func(r chi.Router) {
-				r.Use(adminOnly())
-				registerPlaceholderCRUD(r, "users")
-			})
-			r.Route("/students/", func(r chi.Router) { registerPlaceholderCRUD(r, "students") })
-			r.Route("/guardians/", func(r chi.Router) { registerPlaceholderCRUD(r, "guardians") })
-			r.Route("/admissions/", func(r chi.Router) { registerPlaceholderCRUD(r, "admissions") })
+			usersSvc.RegisterRoutes(r)
 			r.Route("/student-documents/", func(r chi.Router) { registerPlaceholderCRUD(r, "student-documents") })
-			r.Route("/medical-records/", func(r chi.Router) { registerPlaceholderCRUD(r, "medical-records") })
-			r.Route("/student-transfers/", func(r chi.Router) { registerPlaceholderCRUD(r, "student-transfers") })
-			r.Route("/student-withdrawals/", func(r chi.Router) { registerPlaceholderCRUD(r, "student-withdrawals") })
+			// student-transfers/ is a real endpoint now — see transfersSvc.RegisterRoutes(r) above.
 
-			r.Route("/academic-years/", func(r chi.Router) { registerPlaceholderCRUD(r, "academic-years") })
-			r.Route("/terms/", func(r chi.Router) { registerPlaceholderCRUD(r, "terms") })
-			r.Route("/streams/", func(r chi.Router) { registerPlaceholderCRUD(r, "streams") })
-			r.Route("/subjects/", func(r chi.Router) { registerPlaceholderCRUD(r, "subjects") })
-			r.Route("/classes/", func(r chi.Router) { registerPlaceholderCRUD(r, "classes") })
-			r.Route("/grade-requirements/", func(r chi.Router) { registerPlaceholderCRUD(r, "grade-requirements") })
+			// academic-years/, terms/, streams/, subjects/, classes/, grade-requirements/
+			// are real endpoints now — see academicsSvc.RegisterRoutes(r) above.
 			r.Get("/school/profile/", placeholderHandler("school profile"))
-			r.Get("/school/curriculum/", placeholderHandler("school curriculum"))
+			// school/curriculum/ and class-subjects/ are real now — see
+			// curriculumSvc.RegisterRoutes(r) below.
+			curriculumSvc.RegisterRoutes(r)
 
-			r.Route("/departments/", func(r chi.Router) { registerPlaceholderCRUD(r, "departments") })
-			r.Route("/staff/", func(r chi.Router) { registerPlaceholderCRUD(r, "staff") })
+			departmentsSvc.RegisterRoutes(r)
+			staffSvc.RegisterRoutes(r)
 			// payroll-runs/, payroll-entries/, invoices/, payments/, fee-structures/, discounts/
 			// are real endpoints now — see financeProxy.RegisterRoutes(r) above.
 			r.Route("/staff-deductions/", func(r chi.Router) { registerPlaceholderCRUD(r, "staff-deductions") })
 
-			r.Route("/uniforms/", func(r chi.Router) { registerPlaceholderCRUD(r, "uniforms") })
 			r.Route("/unreconciled-payments/", func(r chi.Router) {
 				r.Use(financeOnly())
 				registerPlaceholderCRUD(r, "unreconciled-payments")
 			})
 			r.Route("/finance/", func(r chi.Router) {
 				r.Use(financeOnly())
-				r.Post("/manual-payment/", placeholderHandler("manual payment"))
+				// Cash, cheque, bank slip or card taken at the bursar's desk:
+				// posted, receipted and confirmed by SMS like any M-Pesa payment.
+				r.Post("/manual-payment/", func(w http.ResponseWriter, r *http.Request) {
+					var body map[string]interface{}
+					if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+						httpx.ErrBadRequest(w, "request body must be a JSON object")
+						return
+					}
+					uid, _ := r.Context().Value("user_id").(uuid.UUID)
+					body["received_by_id"] = uid.String()
+					out, err := paymentClient.RecordManualPayment(r.Context(), body)
+					var rpcErr *rpc.RPCError
+					if errors.As(err, &rpcErr) && rpcErr.StatusCode < 500 {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(rpcErr.StatusCode)
+						_, _ = w.Write([]byte(rpcErr.Body))
+						return
+					}
+					if err != nil {
+						httpx.Error(w, http.StatusBadGateway, err)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write(out)
+				})
 				r.Get("/reconciliation/", placeholderHandler("reconciliation"))
 				r.Post("/send-reminders/", func(w http.ResponseWriter, r *http.Request) {
 					sent, err := paymentClient.SendReminders(r.Context())
@@ -133,39 +261,70 @@ func main() {
 					}
 					httpx.JSON(w, http.StatusOK, map[string]int{"sent": sent})
 				})
+				// simulate-payment lets the dashboard fire a Safaricom-shaped
+				// confirmation through the real fee-listener pipeline (match,
+				// payment, invoice recompute) without needing Safaricom's
+				// actual network — the local equivalent of the C2B webhook,
+				// for demos and manual QA. Authenticated + finance-only, so
+				// it doesn't need the public webhook's shared secret.
+				r.Post("/simulate-payment/", func(w http.ResponseWriter, r *http.Request) {
+					var body struct {
+						Amount        float64 `json:"amount" validate:"required,gt=0"`
+						BillRefNumber string  `json:"bill_ref_number" validate:"required"`
+						Phone         string  `json:"phone"`
+						PayerName     string  `json:"payer_name"`
+						TransID       string  `json:"trans_id"`
+					}
+					if err := httpx.BindAndValidate(r, &body); err != nil {
+						httpx.ErrBadRequest(w, err.Error())
+						return
+					}
+					if body.Phone == "" {
+						body.Phone = "254708374149"
+					}
+					if body.TransID == "" {
+						body.TransID = "SIM" + uuid.New().String()[:8]
+					}
+					firstName, lastName := body.PayerName, ""
+					if parts := strings.SplitN(body.PayerName, " ", 2); len(parts) == 2 {
+						firstName, lastName = parts[0], parts[1]
+					}
+					req := &rpc.ProcessMpesaPaymentRequest{
+						TransID:       body.TransID,
+						TransAmount:   body.Amount,
+						BillRefNumber: body.BillRefNumber,
+						TransTime:     time.Now().In(loc).Format("20060102150405"),
+						FirstName:     firstName,
+						LastName:      lastName,
+						MSISDN:        body.Phone,
+						RawPayload:    "simulated from admin dashboard",
+					}
+					res, err := paymentClient.ProcessMpesaPayment(r.Context(), req)
+					if err != nil {
+						api.WriteUpstreamError(w, err)
+						return
+					}
+					httpx.JSON(w, http.StatusOK, res)
+				})
 			})
 
 			r.Route("/attendance/", func(r chi.Router) { registerPlaceholderCRUD(r, "attendance") })
-			r.Route("/assessments/", func(r chi.Router) { registerPlaceholderCRUD(r, "assessments") })
-			r.Route("/marks/", func(r chi.Router) { registerPlaceholderCRUD(r, "marks") })
-			r.Route("/timetable/", func(r chi.Router) { registerPlaceholderCRUD(r, "timetable") })
-			r.Route("/lesson-plans/", func(r chi.Router) { registerPlaceholderCRUD(r, "lesson-plans") })
+			// lesson-plans/ is a real endpoint now — see lessonPlansSvc.RegisterRoutes(r) below.
+			lessonPlansSvc.RegisterRoutes(r)
+			teacherSvc.RegisterRoutes(r)
 
-			r.Route("/announcements/", func(r chi.Router) { registerPlaceholderCRUD(r, "announcements") })
+			announcementsSvc.RegisterRoutes(r)
 			r.Route("/messages/", func(r chi.Router) { registerPlaceholderCRUD(r, "messages") })
 
-			r.Route("/transport-routes/", func(r chi.Router) { registerPlaceholderCRUD(r, "transport-routes") })
-			r.Route("/vehicles/", func(r chi.Router) { registerPlaceholderCRUD(r, "vehicles") })
+			// transport-routes/ and vehicles/ are real endpoints now — see
+			// transportRoutesSvc/vehiclesSvc.RegisterRoutes(r) above.
 			r.Route("/transport-attendance/", func(r chi.Router) { registerPlaceholderCRUD(r, "transport-attendance") })
 
-			r.Route("/library/books/", func(r chi.Router) { registerPlaceholderCRUD(r, "library/books") })
-			r.Route("/library/loans/", func(r chi.Router) { registerPlaceholderCRUD(r, "library/loans") })
+			librarySvc.RegisterRoutes(r)
 			r.Route("/library/reservations/", func(r chi.Router) { registerPlaceholderCRUD(r, "library/reservations") })
 
-			r.Route("/inventory/", func(r chi.Router) { registerPlaceholderCRUD(r, "inventory") })
 
-			r.Route("/reports/", func(r chi.Router) {
-				r.Get("/attendance/", func(w http.ResponseWriter, r *http.Request) {
-					_ = reportClient
-					placeholderHandler("reports/attendance")(w, r)
-				})
-				r.Get("/grades/", placeholderHandler("reports/grades"))
-				r.Route("/fee-collection/", func(r chi.Router) {
-					r.Use(financeOnly())
-					r.Get("/", placeholderHandler("reports/fee-collection"))
-				})
-				r.Get("/class-performance/", placeholderHandler("reports/class-performance"))
-			})
+			reportsSvc.RegisterRoutes(r)
 		})
 
 		r.Route("/nova/", func(r chi.Router) {

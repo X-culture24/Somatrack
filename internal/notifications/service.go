@@ -85,18 +85,23 @@ func (q *Queue) EnqueueEmail(ctx context.Context, to []string, subject, htmlBody
 type SMSSender struct {
 	Backend   string
 	APIKey    string
-	APISender string
-	APIURL    string
+	Username  string // Africa's Talking app username ("sandbox" for the sandbox)
+	APISender string // registered sender ID; empty uses the shared short code
+	APIURL    string // override for the messaging endpoint (tests, proxies)
 }
 
 func (s *SMSSender) Send(ctx context.Context, to, message string) error {
-	if s.Backend == "console" || s.Backend == "" {
+	switch s.Backend {
+	case "console", "":
 		fmt.Fprintf(os.Stderr, "[sms:console] TO=%s MSG=%s\n", to, message)
 		return nil
+	case "africastalking":
+		return s.sendAfricasTalking(ctx, to, message)
+	default:
+		// Fail loudly: silently "sending" through an unknown backend is how
+		// reminders went nowhere before.
+		return fmt.Errorf("unknown SMS_BACKEND %q", s.Backend)
 	}
-	// africastalking / twilio placeholder hooks
-	log.Printf("[sms:%s] SEND %s: %s", s.Backend, to, message)
-	return nil
 }
 
 type EmailSender struct {

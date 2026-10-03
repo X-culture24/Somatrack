@@ -438,12 +438,46 @@ func (c *FinanceClient) ListPayments(ctx context.Context, studentID *uuid.UUID, 
 }
 
 type FeeStructureRow struct {
-	ID            uuid.UUID `json:"id"`
-	Grade         int       `json:"grade"`
-	TermNumber    int       `json:"term_number"`
-	TotalDay      float64   `json:"total_day"`
-	TotalBoarding float64   `json:"total_boarding"`
-	IsActive      bool      `json:"is_active"`
+	ID             uuid.UUID `json:"id"`
+	AcademicYearID uuid.UUID `json:"academic_year_id"`
+	Grade          int       `json:"grade"`
+	TermNumber     int       `json:"term_number"`
+	AdmissionFee   float64   `json:"admission_fee"`
+	TuitionFee     float64   `json:"tuition_fee"`
+	BoardingFee    float64   `json:"boarding_fee"`
+	TransportFee   float64   `json:"transport_fee"`
+	MedicalFee     float64   `json:"medical_fee"`
+	ActivityFee    float64   `json:"activity_fee"`
+	ExamFee        float64   `json:"exam_fee"`
+	LibraryFee     float64   `json:"library_fee"`
+	ComputerFee    float64   `json:"computer_fee"`
+	UniformFee     float64   `json:"uniform_fee"`
+	DiaryBookFee   float64   `json:"diary_book_fee"`
+	OtherFee       float64   `json:"other_fee"`
+	Notes          string    `json:"notes"`
+	TotalDay       float64   `json:"total_day"`
+	TotalBoarding  float64   `json:"total_boarding"`
+	IsActive       bool      `json:"is_active"`
+}
+
+type FeeStructureInput struct {
+	AcademicYearID uuid.UUID `json:"academic_year_id" validate:"required,uuid"`
+	Grade          int       `json:"grade" validate:"min=-2,max=13"`
+	TermNumber     int       `json:"term_number" validate:"required,min=1,max=3"`
+	AdmissionFee   float64   `json:"admission_fee"`
+	TuitionFee     float64   `json:"tuition_fee"`
+	BoardingFee    float64   `json:"boarding_fee"`
+	TransportFee   float64   `json:"transport_fee"`
+	MedicalFee     float64   `json:"medical_fee"`
+	ActivityFee    float64   `json:"activity_fee"`
+	ExamFee        float64   `json:"exam_fee"`
+	LibraryFee     float64   `json:"library_fee"`
+	ComputerFee    float64   `json:"computer_fee"`
+	UniformFee     float64   `json:"uniform_fee"`
+	DiaryBookFee   float64   `json:"diary_book_fee"`
+	OtherFee       float64   `json:"other_fee"`
+	Notes          string    `json:"notes"`
+	IsActive       *bool     `json:"is_active,omitempty"`
 }
 
 func (c *FinanceClient) ListFeeStructures(ctx context.Context, academicYearID *uuid.UUID, grade *int) ([]FeeStructureRow, error) {
@@ -463,14 +497,161 @@ func (c *FinanceClient) ListFeeStructures(ctx context.Context, academicYearID *u
 	return out.Data, nil
 }
 
+func (c *FinanceClient) CreateFeeStructure(ctx context.Context, in FeeStructureInput) (*FeeStructureRow, error) {
+	var out FeeStructureRow
+	if err := c.do(ctx, http.MethodPost, "/internal/fee-structures", in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *FinanceClient) GetFeeStructure(ctx context.Context, id uuid.UUID) (*FeeStructureRow, error) {
+	var out FeeStructureRow
+	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/internal/fee-structures/%s", id), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *FinanceClient) UpdateFeeStructure(ctx context.Context, id uuid.UUID, in FeeStructureInput) (*FeeStructureRow, error) {
+	var out FeeStructureRow
+	if err := c.do(ctx, http.MethodPut, fmt.Sprintf("/internal/fee-structures/%s", id), in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *FinanceClient) DeleteFeeStructure(ctx context.Context, id uuid.UUID) error {
+	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/internal/fee-structures/%s", id), nil, nil)
+}
+
 type DiscountRow struct {
 	ID            uuid.UUID `json:"id"`
 	StudentID     uuid.UUID `json:"student_id"`
+	TermID        uuid.UUID `json:"term_id"`
 	WaiverType    string    `json:"waiver_type"`
 	Amount        float64   `json:"amount"`
 	Percentage    *float64  `json:"percentage,omitempty"`
 	Reason        string    `json:"reason,omitempty"`
 	EffectiveDate string    `json:"effective_date"`
+}
+
+type DiscountInput struct {
+	StudentID     uuid.UUID  `json:"student_id" validate:"required,uuid"`
+	TermID        uuid.UUID  `json:"term_id" validate:"required,uuid"`
+	WaiverType    string     `json:"waiver_type" validate:"required,oneof=scholarship bursary discount staff_child orphan sibling_discount other"`
+	Amount        float64    `json:"amount"`
+	Percentage    *float64   `json:"percentage,omitempty"`
+	Reason        string     `json:"reason"`
+	EffectiveDate string     `json:"effective_date" validate:"required"`
+	ExpiryDate    string     `json:"expiry_date,omitempty"`
+	ApprovedByID  *uuid.UUID `json:"approved_by_id,omitempty"`
+}
+
+func (c *FinanceClient) CreateDiscount(ctx context.Context, in DiscountInput) (*DiscountRow, error) {
+	var out DiscountRow
+	if err := c.do(ctx, http.MethodPost, "/internal/discounts", in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+type BillingSkip struct {
+	StudentID uuid.UUID `json:"student_id"`
+	Reason    string    `json:"reason"`
+}
+
+type BillingRunResult struct {
+	TermID    uuid.UUID     `json:"term_id"`
+	Generated int           `json:"generated"`
+	Skipped   []BillingSkip `json:"skipped"`
+}
+
+func (c *FinanceClient) GenerateBilling(ctx context.Context, termID uuid.UUID) (*BillingRunResult, error) {
+	var out BillingRunResult
+	body := map[string]interface{}{"term_id": termID}
+	if err := c.do(ctx, http.MethodPost, "/internal/billing/generate", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// BillStudent generates/refreshes a single student's invoice for whichever
+// term is currently active — called right after a student is created or
+// enrolled so a real fee balance exists immediately. Billing failure (no fee
+// structure set up yet for their grade, no current term configured, etc.)
+// is expected to be treated as non-fatal by the caller — enrollment itself
+// should still succeed.
+func (c *FinanceClient) BillStudent(ctx context.Context, studentID uuid.UUID) (*uuid.UUID, error) {
+	var out struct {
+		InvoiceID *uuid.UUID `json:"invoice_id"`
+	}
+	if err := c.do(ctx, http.MethodPost, fmt.Sprintf("/internal/students/%s/bill", studentID), nil, &out); err != nil {
+		return nil, err
+	}
+	return out.InvoiceID, nil
+}
+
+type AdhocFee struct {
+	ID                    uuid.UUID  `json:"id"`
+	Name                  string     `json:"name"`
+	Description           string     `json:"description"`
+	Amount                float64    `json:"amount"`
+	Grade                 *int       `json:"grade,omitempty"`
+	StreamID              *uuid.UUID `json:"stream_id,omitempty"`
+	ClassID               *uuid.UUID `json:"class_id,omitempty"`
+	TermID                uuid.UUID  `json:"term_id"`
+	IsMandatory           bool       `json:"is_mandatory"`
+	AppliesToBoardingOnly bool       `json:"applies_to_boarding_only"`
+	Deadline              *string    `json:"deadline,omitempty"`
+}
+
+type AdhocFeeInput struct {
+	Name                  string     `json:"name" validate:"required"`
+	Description           string     `json:"description"`
+	Amount                float64    `json:"amount" validate:"required,gt=0"`
+	Grade                 *int       `json:"grade,omitempty"`
+	StreamID              *uuid.UUID `json:"stream_id,omitempty"`
+	ClassID               *uuid.UUID `json:"class_id,omitempty"`
+	TermID                uuid.UUID  `json:"term_id" validate:"required,uuid"`
+	IsMandatory           bool       `json:"is_mandatory"`
+	AppliesToBoardingOnly bool       `json:"applies_to_boarding_only"`
+	Deadline              string     `json:"deadline,omitempty"`
+}
+
+func (c *FinanceClient) ListAdhocFees(ctx context.Context, termID *uuid.UUID) ([]AdhocFee, error) {
+	q := url.Values{}
+	if termID != nil {
+		q.Set("term_id", termID.String())
+	}
+	var out struct {
+		Data []AdhocFee `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, withQuery("/internal/adhoc-fees", q), nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Data, nil
+}
+
+func (c *FinanceClient) CreateAdhocFee(ctx context.Context, in AdhocFeeInput) (*AdhocFee, error) {
+	var out AdhocFee
+	if err := c.do(ctx, http.MethodPost, "/internal/adhoc-fees", in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *FinanceClient) DeleteAdhocFee(ctx context.Context, id uuid.UUID) error {
+	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/internal/adhoc-fees/%s", id), nil, nil)
+}
+
+func (c *FinanceClient) AddInvoiceCharge(ctx context.Context, invoiceID uuid.UUID, adhocFeeID *uuid.UUID, description string, amount float64) (*InvoiceDetail, error) {
+	body := map[string]interface{}{"adhoc_fee_id": adhocFeeID, "description": description, "amount": amount}
+	var out InvoiceDetail
+	if err := c.do(ctx, http.MethodPost, fmt.Sprintf("/internal/invoices/%s/charges", invoiceID), body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *FinanceClient) ListDiscounts(ctx context.Context, studentID *uuid.UUID) ([]DiscountRow, error) {
@@ -568,6 +749,27 @@ func (c *FinanceClient) DisburseEntry(ctx context.Context, entryID uuid.UUID) (*
 	return &out, nil
 }
 
+// EquityEFTTransaction is the result of an Equity EFT salary disbursement.
+type EquityEFTTransaction struct {
+	ID             uuid.UUID `json:"id"`
+	PayrollEntryID uuid.UUID `json:"payroll_entry_id"`
+	Amount         float64   `json:"amount"`
+	DestAccount    string    `json:"dest_account_number"`
+	DestName       string    `json:"dest_name"`
+	Reference      string    `json:"reference"`
+	Status         string    `json:"status"`
+	TransactionRef string    `json:"transaction_ref,omitempty"`
+	ResultDesc     string    `json:"result_desc,omitempty"`
+}
+
+func (c *FinanceClient) DisburseEntryEquity(ctx context.Context, entryID uuid.UUID) (*EquityEFTTransaction, error) {
+	var out EquityEFTTransaction
+	if err := c.do(ctx, http.MethodPost, fmt.Sprintf("/internal/payroll/entries/%s/disburse/equity", entryID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 type PaymentClient struct {
 	*Client
 }
@@ -624,12 +826,110 @@ func (c *PaymentClient) RecomputeInvoiceTotals(ctx context.Context, invoiceID uu
 	return &out, nil
 }
 
+// RecordManualPayment posts a cash/cheque/bank payment taken at the bursar's
+// desk. body is forwarded as-is; a 400 comes back as *RPCError with the
+// field messages in Body.
+func (c *PaymentClient) RecordManualPayment(ctx context.Context, body map[string]interface{}) (json.RawMessage, error) {
+	var out json.RawMessage
+	if err := c.do(ctx, http.MethodPost, "/internal/payments/manual", body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *PaymentClient) SendReminders(ctx context.Context) (int, error) {
 	var out struct{ Sent int `json:"sent"` }
 	if err := c.do(ctx, http.MethodPost, "/internal/reminders/send", nil, &out); err != nil {
 		return 0, err
 	}
 	return out.Sent, nil
+}
+
+type STKPushInitiateRequest struct {
+	StudentID   uuid.UUID `json:"student_id"`
+	InitiatedBy uuid.UUID `json:"initiated_by"`
+	Phone       string    `json:"phone"`
+	Amount      float64   `json:"amount"`
+}
+
+type STKPushRequestResult struct {
+	ID                uuid.UUID `json:"id"`
+	StudentID         uuid.UUID `json:"student_id"`
+	PhoneNumber       string    `json:"phone_number"`
+	Amount            float64   `json:"amount"`
+	Status            string    `json:"status"`
+	CheckoutRequestID string    `json:"checkout_request_id,omitempty"`
+	ResultDesc        string    `json:"result_desc,omitempty"`
+	MpesaReceiptNo    string    `json:"mpesa_receipt_no,omitempty"`
+}
+
+func (c *PaymentClient) InitiateSTKPush(ctx context.Context, req *STKPushInitiateRequest) (*STKPushRequestResult, error) {
+	var out STKPushRequestResult
+	if err := c.do(ctx, http.MethodPost, "/internal/payments/stk-push/initiate", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ForwardSTKCallback relays Safaricom's raw STK callback body to payment-svc
+// over the trusted internal channel — used when only the gateway has a
+// public tunnel (e.g. ngrok's free-tier one-tunnel limit), so the gateway's
+// own public (unauthenticated, since Safaricom carries no JWT) callback
+// route just passes the payload through rather than processing it itself.
+// ForwardJengaIPN relays an Equity Jenga IPN (already authenticated by the
+// gateway) to payment-svc, mirroring ForwardSTKCallback.
+func (c *PaymentClient) ForwardJengaIPN(ctx context.Context, payload json.RawMessage) error {
+	return c.do(ctx, http.MethodPost, "/internal/payments/jenga/ipn", payload, nil)
+}
+
+func (c *PaymentClient) ForwardSTKCallback(ctx context.Context, payload map[string]interface{}) error {
+	return c.do(ctx, http.MethodPost, "/internal/payments/stk-push/callback", payload, nil)
+}
+
+func (c *PaymentClient) STKPushStatus(ctx context.Context, id uuid.UUID) (*STKPushRequestResult, error) {
+	var out STKPushRequestResult
+	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/internal/payments/stk-push/%s/status", id), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// EquityRTBInitiateRequest is the Equity Request to Pay initiation payload.
+type EquityRTBInitiateRequest struct {
+	StudentID   uuid.UUID `json:"student_id"`
+	InitiatedBy uuid.UUID `json:"initiated_by"`
+	Phone       string    `json:"phone"`
+	Amount      float64   `json:"amount"`
+	WalletName  string    `json:"wallet_name,omitempty"`
+}
+
+// EquityRTBResult is the response from initiating or querying an Equity RTB request.
+type EquityRTBResult struct {
+	ID          uuid.UUID `json:"id"`
+	StudentID   uuid.UUID `json:"student_id"`
+	PhoneNumber string    `json:"phone_number"`
+	Amount      float64   `json:"amount"`
+	WalletName  string    `json:"wallet_name"`
+	PartnerRef  string    `json:"partner_ref"`
+	RequestRef  string    `json:"request_ref,omitempty"`
+	Status      string    `json:"status"`
+	ResultDesc  string    `json:"result_desc,omitempty"`
+}
+
+func (c *PaymentClient) InitiateEquityRTB(ctx context.Context, req *EquityRTBInitiateRequest) (*EquityRTBResult, error) {
+	var out EquityRTBResult
+	if err := c.do(ctx, http.MethodPost, "/internal/payments/equity/rtb/initiate", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *PaymentClient) EquityRTBStatus(ctx context.Context, id uuid.UUID) (*EquityRTBResult, error) {
+	var out EquityRTBResult
+	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/internal/payments/equity/rtb/%s/status", id), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 type NotificationClient struct {

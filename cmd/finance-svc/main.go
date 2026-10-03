@@ -16,6 +16,7 @@ import (
 	"github.com/stmaryskabete/lms/internal/config"
 	"github.com/stmaryskabete/lms/internal/db"
 	"github.com/stmaryskabete/lms/internal/finance"
+	"github.com/stmaryskabete/lms/internal/jenga"
 	"github.com/stmaryskabete/lms/internal/shared/httpx"
 )
 
@@ -36,6 +37,16 @@ func main() {
 	darajaClient := finance.NewDarajaB2CClient()
 	disbursementStore := finance.NewDisbursementStore(pool, payrollStore, darajaClient)
 	svc := finance.NewService(feeStore, payrollStore, disbursementStore)
+
+	jengaCfg := jenga.ConfigFromEnv()
+	jengaClient := jenga.NewClient(jengaCfg)
+	if jengaClient.Configured() {
+		equityDisburse := finance.NewEquityDisbursementStore(pool, payrollStore, jengaClient)
+		svc.EnableEquityDisbursement(equityDisburse)
+		log.Printf("[finance-svc] equity EFT disbursement enabled — env=%s", jengaCfg.Env)
+	} else {
+		log.Printf("[finance-svc] equity EFT disabled, missing: %v", jengaCfg.Missing())
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)

@@ -17,6 +17,7 @@ import (
 
 	"github.com/stmaryskabete/lms/internal/config"
 	"github.com/stmaryskabete/lms/internal/db"
+	"github.com/stmaryskabete/lms/internal/jenga"
 	"github.com/stmaryskabete/lms/internal/payments"
 	"github.com/stmaryskabete/lms/internal/shared/httpx"
 	"github.com/stmaryskabete/lms/internal/shared/rpc"
@@ -61,7 +62,25 @@ func main() {
 		notifCli = rpc.NewNotificationClient(notifURL, key)
 	}
 
-	svc := payments.NewService(matcher, reconciler, processor, cfg.MpesaSharedSecret, cfg.MpesaAllowedIPs, notifCli, loc, useAsync)
+	stkClient := payments.NewDarajaSTKClient()
+	stkStore := payments.NewSTKPushStore(pool, reconciler, stkClient)
+	if notifCli != nil {
+		reconciler.SetNotifier(payments.NewNotifier(pool, notifCli, cfg.PortalURL))
+	} else {
+		log.Printf("[payment-svc] NOTIFICATION_SERVICE_URL not set — payment confirmation SMS disabled")
+	}
+	svc := payments.NewService(matcher, reconciler, processor, cfg.MpesaSharedSecret, cfg.MpesaAllowedIPs, notifCli, loc, useAsync, stkStore)
+	jengaCfg := jenga.ConfigFromEnv()
+	jengaClient := jenga.NewClient(jengaCfg)
+	svc.EnableJenga(jengaClient, jenga.IPNAuthFromEnv(), cfg.MpesaAccountPrefix)
+	if missing := jengaCfg.Missing(); len(missing) > 0 {
+		log.Printf("[payment-svc] jenga (%s): IPN receiver on, API calls off until set: %v", jengaCfg.Env, missing)
+	}
+	if jengaClient.Configured() {
+		rtbStore := payments.NewEquityRTBStore(pool, reconciler, jengaClient)
+		svc.EnableEquityRTB(rtbStore)
+		log.Printf("[payment-svc] equity RTB (request to pay) enabled — env=%s", jengaCfg.Env)
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
